@@ -30,7 +30,7 @@ Los anuncios se guardan en `data/crudo/<fuente>/<año>-S<semana>.parquet`, un ar
 from pathlib import Path
 from observatorio_inmobiliario.almacenamiento import leer_observaciones
 
-df = leer_observaciones(Path("data/crudo"))           # todas las fuentes
+df = leer_observaciones(Path("data/crudo"))  # todas las fuentes
 df = leer_observaciones(Path("data/crudo"), "santafe")  # una sola fuente
 ```
 

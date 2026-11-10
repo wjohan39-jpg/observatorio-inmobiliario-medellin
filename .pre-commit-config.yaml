@@ -1,5 +1,8 @@
 # Revisiones automáticas antes de cada commit.
-# Instalar una sola vez con:  uv run pre-commit install
+# Instalar (o reinstalar tras cambiar este archivo) con:  uv run pre-commit install
+default_install_hook_types: [pre-commit, commit-msg]
+default_stages: [pre-commit]
+
 repos:
   - repo: https://github.com/pre-commit/pre-commit-hooks
     rev: v5.0.0
@@ -30,3 +33,12 @@ repos:
         language: system
         types: [python]
         pass_filenames: false
+
+      # Mensaje de commit con el formato "tipo: descripción" (Conventional Commits).
+      # Ejemplos válidos:  "feat: adaptador de Santa Fe"   "fix(http): reintentos en 429"
+      - id: mensaje-commit
+        name: "mensaje de commit (tipo: descripción)"
+        language: pygrep
+        entry: '\A(feat|fix|docs|test|chore|refactor|style|perf|ci|build)(\([a-z0-9-]+\))?!?: \S'
+        args: [--negate, --multiline]
+        stages: [commit-msg]

@@ -83,6 +83,44 @@ def test_respeta_robots(sitio: respx.MockRouter, cliente: ClienteCortes) -> None
     assert not ruta.called
 
 
+ROBOTS_SANTA_FE = """User-Agent: *
+Allow: /
+Allow: /apisf/property/
+Allow: /apisf/properties
+Disallow: /admin
+Disallow: /api/
+Disallow: /apisf/
+"""
+
+
+@pytest.mark.parametrize(
+    ("ruta", "permitida"),
+    [
+        ("/apisf/properties", True),
+        ("/apisf/property/A22843", True),
+        ("/propiedades", True),
+        ("/admin", False),
+        ("/api/secreto", False),
+        ("/apisf/otra", False),
+    ],
+)
+def test_robots_usa_la_regla_mas_especifica(
+    sitio: respx.MockRouter, cliente: ClienteCortes, ruta: str, permitida: bool
+) -> None:
+    """RFC 9309: gana la regla más larga, no la primera.
+
+    Regresión: en Python 3.12, ``urllib.robotparser`` aplicaba la primera regla que
+    coincidía, así que ``Allow: /`` al inicio permitía también ``/admin``.
+    """
+    sitio.get("/robots.txt").respond(200, text=ROBOTS_SANTA_FE)
+    sitio.get(ruta).respond(200, json={})
+    if permitida:
+        assert cliente.get_json(ruta) == {}
+    else:
+        with pytest.raises(ErrorRutaBloqueadaPorRobots):
+            cliente.get_json(ruta)
+
+
 def test_robots_se_descarga_una_sola_vez(sitio: respx.MockRouter, cliente: ClienteCortes) -> None:
     sitio.get("/api/items").respond(200, json={})
     cliente.get_json("/api/items")

@@ -14,9 +14,9 @@ import time
 from collections.abc import Callable, Mapping
 from types import TracebackType
 from typing import Any, Self
-from urllib.robotparser import RobotFileParser
 
 import httpx
+from protego import Protego
 
 from observatorio_inmobiliario.config import SEGUNDOS_ENTRE_PETICIONES, USER_AGENT
 
@@ -64,7 +64,7 @@ class ClienteCortes:
         self._dormir = dormir
         self._reloj = reloj
         self._ultima_peticion: float | None = None
-        self._robots: RobotFileParser | None = None
+        self._robots: Protego | None = None
         self._http = httpx.Client(
             base_url=self._url_base,
             headers={"User-Agent": USER_AGENT},
@@ -104,14 +104,18 @@ class ClienteCortes:
 
     def _get_permitido(self, ruta: str, params: Parametros | None) -> httpx.Response:
         url = self._url_base.join(ruta).copy_merge_params(dict(params or {}))
-        if not self._obtener_robots().can_fetch(USER_AGENT, str(url)):
+        if not self._obtener_robots().can_fetch(str(url), USER_AGENT):
             raise ErrorRutaBloqueadaPorRobots(f"robots.txt no permite {url}")
         return self._get_con_reintentos(ruta, params)
 
-    def _obtener_robots(self) -> RobotFileParser:
-        """Descarga y analiza robots.txt la primera vez; luego usa la copia en memoria."""
+    def _obtener_robots(self) -> Protego:
+        """Descarga y analiza robots.txt la primera vez; luego usa la copia en memoria.
+
+        Se usa ``protego`` (el parser de Scrapy) y no ``urllib.robotparser`` porque este
+        último, hasta Python 3.13, aplica la primera regla que coincide en lugar de la más
+        específica (RFC 9309), y con ``Allow: /`` al inicio permitiría rutas prohibidas.
+        """
         if self._robots is None:
-            robots = RobotFileParser()
             try:
                 texto = self._get_con_reintentos("/robots.txt", None).text
             except ErrorDeDescarga as error:
@@ -121,8 +125,7 @@ class ClienteCortes:
                 ):
                     raise
                 texto = ""
-            robots.parse(texto.splitlines())
-            self._robots = robots
+            self._robots = Protego.parse(texto)
         return self._robots
 
     def _esperar_turno(self) -> None:

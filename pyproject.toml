@@ -51,8 +51,8 @@ packages = ["observatorio_inmobiliario"]
 
 # ---------------------------------------------------------------- pytest
 [tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "-ra --strict-markers"
+testpaths = ["src", "tests"]
+addopts = "-ra --strict-markers --doctest-modules"
 
 [tool.coverage.run]
 source = ["observatorio_inmobiliario"]

@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  calidad-y-pruebas:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.14"]
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Instalar dependencias
+        run: uv sync --locked --python ${{ matrix.python-version }}
+
+      - name: Lint (ruff)
+        run: uv run ruff check .
+
+      - name: Formato (ruff)
+        run: uv run ruff format --check .
+
+      - name: Tipos (mypy)
+        run: uv run mypy
+
+      - name: Pruebas (pytest)
+        run: uv run pytest --cov --cov-report=term-missing

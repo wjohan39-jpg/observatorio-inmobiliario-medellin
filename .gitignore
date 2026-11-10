@@ -1,0 +1,39 @@
+# --- Datos del proyecto: NUNCA al repo público -------------------------
+data/crudo/
+
+# --- Secretos -----------------------------------------------------------
+.env
+.env.*
+.streamlit/secrets.toml
+
+# --- Python -------------------------------------------------------------
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+
+# --- Entornos virtuales -------------------------------------------------
+.venv/
+venv/
+
+# --- Herramientas -------------------------------------------------------
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+.ipynb_checkpoints/
+
+# --- Editores y sistema operativo ---------------------------------------
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Herramientas locales de IA y grafos (no son parte del proyecto) ----
+.claude/
+.gitnexus/
+.codegraph/
+graphify-out/

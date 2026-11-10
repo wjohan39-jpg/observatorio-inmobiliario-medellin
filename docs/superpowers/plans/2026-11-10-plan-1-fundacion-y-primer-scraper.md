@@ -29,7 +29,7 @@
 1. **Precios con formatos raros** (`"$ 2.500.000"`, `"Consultar"`, `0`, `""`): deben convertirse en entero o en `None`, nunca en un crash ni en un precio falso. Pruebas en la Tarea 2.
 2. **Un anuncio inválido o un detalle que falla** no debe tumbar toda la corrida. Se registra una advertencia, se descarta o se completa con `None`, y la corrida sigue. Pruebas en la Tarea 5.
 3. **Errores de red** (timeout, 429, 5xx): se reintentan con espera creciente. Después del último intento se lanza `ErrorDeDescarga`, y un 404 no se reintenta. Pruebas en la Tarea 4.
-4. **Rutas bloqueadas por robots.txt**: el cliente se niega a pedirlas (`RutaBloqueadaPorRobots`). Pruebas en la Tarea 4.
+4. **Rutas bloqueadas por robots.txt**: el cliente se niega a pedirlas (`ErrorRutaBloqueadaPorRobots`). Pruebas en la Tarea 4.
 5. **Correr dos veces la misma semana**: debe sobrescribir el mismo archivo, sin duplicar filas. Pruebas en la Tarea 6.
 
 ---
@@ -233,7 +233,7 @@ Esta tarea no tiene pruebas. Es el primer acercamiento del autor a git y se hace
 - Produces:
   ```python
   class ErrorDeDescarga(Exception): ...
-  class RutaBloqueadaPorRobots(Exception): ...
+  class ErrorRutaBloqueadaPorRobots(Exception): ...
 
   class ClienteCortes:
       def __init__(
@@ -241,7 +241,7 @@ Esta tarea no tiene pruebas. Es el primer acercamiento del autor a git y se hace
           url_base: str,
           *,
           segundos_entre_peticiones: float = SEGUNDOS_ENTRE_PETICIONES,
-          max_reintentos: int = 3,
+          max_intentos: int = 3,
           timeout: float = 30.0,
           dormir: Callable[[float], None] = time.sleep,
           reloj: Callable[[], float] = time.monotonic,
@@ -252,18 +252,18 @@ Esta tarea no tiene pruebas. Es el primer acercamiento del autor a git y se hace
   ```
 - Comportamiento:
   - La primera petición descarga `<url_base>/robots.txt` con `urllib.robotparser`. Si robots.txt da 404, todo queda permitido.
-  - Antes de cada petición se verifica `can_fetch(USER_AGENT, url)`. Si la ruta no está permitida, se lanza `RutaBloqueadaPorRobots`.
+  - Antes de cada petición se verifica `can_fetch(USER_AGENT, url)`. Si la ruta no está permitida, se lanza `ErrorRutaBloqueadaPorRobots`.
   - Si desde la petición anterior pasó menos de `segundos_entre_peticiones`, se llama a `dormir(lo_que_falta)`.
-  - Los errores 429, 5xx, `httpx.TimeoutException` y `httpx.TransportError` se reintentan con `dormir(2 ** intento)`, hasta `max_reintentos`. Si se agotan, se lanza `ErrorDeDescarga`.
+  - Los errores 429, 5xx, `httpx.TimeoutException` y `httpx.TransportError` se reintentan con `dormir(2 ** intento)`, hasta `max_intentos` (intentos totales). Si se agotan, se lanza `ErrorDeDescarga`.
   - Otros errores 4xx lanzan `ErrorDeDescarga` de inmediato, sin reintentar.
 
 - [ ] **Paso 1:** Escribir las pruebas con `respx`. Para el tiempo se usan un `dormir` falso que guarda las llamadas en una lista y un `reloj` controlado.
   - `test_envia_user_agent`: la petición lleva el header `User-Agent == USER_AGENT`.
-  - `test_respeta_robots`: con robots `Disallow: /privado`, `get_json("/privado/x")` lanza `RutaBloqueadaPorRobots` y no hace la petición.
+  - `test_respeta_robots`: con robots `Disallow: /privado`, `get_json("/privado/x")` lanza `ErrorRutaBloqueadaPorRobots` y no hace la petición.
   - `test_robots_404_permite_todo`.
   - `test_espera_entre_peticiones`: dos `get_json` seguidos con el reloj sin avanzar. `dormir` recibe ≈1.5.
   - `test_reintenta_en_503_y_luego_funciona`: responde 503, 503 y luego 200 con `{"ok": true}`. El resultado es `{"ok": True}` y en `dormir` aparecen las esperas 2 y 4.
-  - `test_falla_tras_agotar_reintentos`: siempre 500, lanza `ErrorDeDescarga`.
+  - `test_falla_tras_agotar_intentos`: siempre 500, lanza `ErrorDeDescarga`.
   - `test_404_no_reintenta`: se lanza `ErrorDeDescarga` y la ruta se llamó una sola vez.
 - [ ] **Paso 2:** Correr las pruebas. Esperado: FAIL.
 - [ ] **Paso 3:** Implementar `ClienteCortes` sobre `httpx.Client(base_url=..., headers={"User-Agent": ...}, timeout=..., follow_redirects=True)`.

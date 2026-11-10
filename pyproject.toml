@@ -41,6 +41,9 @@ select = [
     "SIM", # simplificaciones
     "N",   # convenciones de nombres (PEP 8)
 ]
+ignore = [
+    "N818",  # exige el sufijo "Error" (inglés); en español usamos el prefijo: ErrorDeDescarga
+]
 
 # ---------------------------------------------------------------- mypy
 [tool.mypy]

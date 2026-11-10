@@ -15,6 +15,27 @@ Proyecto de análisis de datos de punta a punta: **extrae** anuncios de inmobili
 - ¿Qué inmobiliarias publican el mismo inmueble y con qué diferencia de precio?
 - ¿Cómo evolucionan los precios semana a semana?
 
+## Uso
+
+```bash
+uv sync
+uv run observatorio scrape santafe                  # corrida completa (puede tardar más de 40 min)
+uv run observatorio scrape santafe --max-paginas 2  # corrida corta de prueba (~1,5 min)
+uv run observatorio scrape --help                   # todas las opciones
+```
+
+Los anuncios se guardan en `data/crudo/<fuente>/<año>-S<semana>.parquet`, un archivo por semana ISO. Si se corre dos veces en la misma semana, se sobrescribe el archivo, sin duplicar filas. Para leerlos:
+
+```python
+from pathlib import Path
+from observatorio_inmobiliario.almacenamiento import leer_observaciones
+
+df = leer_observaciones(Path("data/crudo"))           # todas las fuentes
+df = leer_observaciones(Path("data/crudo"), "santafe")  # una sola fuente
+```
+
+Fuentes disponibles: `santafe` (Arrendamientos Santa Fe). Las demás se agregan en los siguientes planes de la [hoja de ruta](docs/superpowers/plans/2026-11-10-hoja-de-ruta.md).
+
 ## Desarrollo
 
 Requiere [uv](https://docs.astral.sh/uv/).

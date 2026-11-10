@@ -53,6 +53,11 @@ strict = true
 mypy_path = "src"
 packages = ["observatorio_inmobiliario"]
 
+[[tool.mypy.overrides]]
+# pyarrow no publica tipos. Su uso se limita a almacenamiento.py, que sí expone tipos.
+module = ["pyarrow", "pyarrow.*"]
+ignore_missing_imports = true
+
 # ---------------------------------------------------------------- pytest
 [tool.pytest.ini_options]
 testpaths = ["src", "tests"]

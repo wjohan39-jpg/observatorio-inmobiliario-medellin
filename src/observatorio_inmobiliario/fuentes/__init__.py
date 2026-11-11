@@ -10,6 +10,7 @@ from observatorio_inmobiliario.fuentes import (
     alnago,
     maxibienes,
     nutibara,
+    panorama,
     puertabierta,
     santafe,
     uribienes,
@@ -48,6 +49,7 @@ REGISTRO: dict[str, RegistroFuente] = {
     activourbano.FuenteActivoUrbano.nombre: RegistroFuente(
         activourbano.URL_BASE, activourbano.FuenteActivoUrbano
     ),
+    panorama.FuentePanorama.nombre: RegistroFuente(panorama.URL_BASE, panorama.FuentePanorama),
 }
 
 

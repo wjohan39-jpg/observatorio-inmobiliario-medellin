@@ -14,6 +14,7 @@ from observatorio_inmobiliario.fuentes import (
     puertabierta,
     santafe,
     uribienes,
+    villacruz,
 )
 from observatorio_inmobiliario.fuentes.base import Fuente
 from observatorio_inmobiliario.http import ClienteCortes
@@ -50,6 +51,7 @@ REGISTRO: dict[str, RegistroFuente] = {
         activourbano.URL_BASE, activourbano.FuenteActivoUrbano
     ),
     panorama.FuentePanorama.nombre: RegistroFuente(panorama.URL_BASE, panorama.FuentePanorama),
+    villacruz.FuenteVillacruz.nombre: RegistroFuente(villacruz.URL_BASE, villacruz.FuenteVillacruz),
 }
 
 

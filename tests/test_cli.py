@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterator
 from contextlib import contextmanager
 from datetime import date
@@ -116,3 +117,31 @@ def test_error_de_descarga_no_guarda_nada(
     assert cli.main(["scrape", "santafe", "--salida", str(tmp_path)]) == 1
     assert not any(tmp_path.iterdir())
     assert "503" in capsys.readouterr().err
+
+
+# --------------------------------------------------------------------- catalogo
+
+
+def test_catalogo_guarda_el_geojson(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, capsys: pytest.CaptureFixture[str]
+) -> None:
+    coleccion = {"type": "FeatureCollection", "features": [{"properties": {"nombre": "Belén"}}]}
+    monkeypatch.setattr(cli, "descargar_catalogo", lambda cliente: coleccion)
+    salida = tmp_path / "ref" / "barrios.geojson"
+
+    assert cli.main(["catalogo", "--salida", str(salida)]) == 0
+
+    assert json.loads(salida.read_text(encoding="utf-8")) == coleccion
+    assert "Belén" in salida.read_text(encoding="utf-8")  # sin escapes é
+    assert "1 barrios y veredas guardados" in capsys.readouterr().out
+
+
+def test_catalogo_incompleto_no_guarda(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    def falla(cliente: object) -> None:
+        raise ValueError("El catálogo trajo 10 polígonos")
+
+    monkeypatch.setattr(cli, "descargar_catalogo", falla)
+    salida = tmp_path / "barrios.geojson"
+
+    assert cli.main(["catalogo", "--salida", str(salida)]) == 1
+    assert not salida.exists()

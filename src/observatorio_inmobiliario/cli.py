@@ -4,17 +4,24 @@ Uso::
 
     observatorio scrape santafe                     # corrida completa
     observatorio scrape santafe --max-paginas 2     # corrida corta de prueba
+    observatorio catalogo                           # actualiza el catálogo oficial de barrios
 """
 
 import argparse
+import json
 import logging
 import sys
 from collections.abc import Sequence
 from pathlib import Path
 
 from observatorio_inmobiliario.almacenamiento import guardar_observaciones
+from observatorio_inmobiliario.catalogo import RUTA_GEOJSON, URL_BASE_CATALOGO, descargar_catalogo
 from observatorio_inmobiliario.fuentes import REGISTRO, crear_fuente
-from observatorio_inmobiliario.http import ErrorDeDescarga, ErrorRutaBloqueadaPorRobots
+from observatorio_inmobiliario.http import (
+    ClienteCortes,
+    ErrorDeDescarga,
+    ErrorRutaBloqueadaPorRobots,
+)
 from observatorio_inmobiliario.modelos import AnuncioNormalizado
 
 logger = logging.getLogger(__name__)
@@ -65,7 +72,33 @@ def _crear_parser() -> argparse.ArgumentParser:
         metavar="N",
         help="páginas por tipo de oferta como máximo; útil para pruebas",
     )
+
+    catalogo = comandos.add_parser(
+        "catalogo",
+        help="descarga el catálogo oficial de barrios de Medellín",
+        description="Descarga de la Alcaldía de Medellín los límites de barrios y veredas.",
+    )
+    catalogo.add_argument(
+        "--salida",
+        type=Path,
+        default=RUTA_GEOJSON,
+        help=f"archivo GeoJSON de salida (por defecto: {RUTA_GEOJSON})",
+    )
     return parser
+
+
+def _catalogo(salida: Path) -> int:
+    try:
+        with ClienteCortes(URL_BASE_CATALOGO) as cliente:
+            geojson = descargar_catalogo(cliente)
+    except (ErrorDeDescarga, ErrorRutaBloqueadaPorRobots, ValueError) as error:
+        print(f"catálogo: la descarga falló y no se guardó nada ({error})", file=sys.stderr)
+        return 1
+    salida.parent.mkdir(parents=True, exist_ok=True)
+    texto = json.dumps(geojson, ensure_ascii=False, separators=(",", ":"))
+    salida.write_text(texto + "\n", encoding="utf-8")
+    print(f"{len(geojson['features'])} barrios y veredas guardados en {salida}")
+    return 0
 
 
 def _scrape(fuente: str, salida: Path, *, con_detalle: bool, max_paginas: int | None) -> int:
@@ -97,7 +130,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     # httpx registra cada petición en INFO; en una corrida completa taparía el avance.
     logging.getLogger("httpx").setLevel(logging.WARNING)
 
-    # Por ahora solo existe "scrape"; argparse ya rechazó cualquier otro comando.
+    if args.comando == "catalogo":
+        return _catalogo(args.salida)
     return _scrape(
         args.fuente,
         args.salida,

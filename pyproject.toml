@@ -13,6 +13,7 @@ dependencies = [
     "pyarrow>=26.0.1",
     "pydantic>=2",
     "selectolax>=1.0.2",
+    "shapely>=2.2.0",
 ]
 
 [project.scripts]
@@ -81,4 +82,5 @@ dev = [
     "pytest-cov>=7.1.0",
     "respx>=0.23.1",
     "ruff>=0.17.4",
+    "types-shapely>=2.1.0.20261030",
 ]

@@ -1,0 +1,116 @@
+{
+ "type": "FeatureCollection",
+ "features": [
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -75.6,
+       6.25
+      ],
+      [
+       -75.58999999999999,
+       6.25
+      ],
+      [
+       -75.58999999999999,
+       6.26
+      ],
+      [
+       -75.6,
+       6.26
+      ],
+      [
+       -75.6,
+       6.25
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "codigo": "6005",
+    "nombre_barrio": "Naranjal",
+    "comuna": "60",
+    "nombre_comuna": "SAN CRISTOBAL",
+    "indicador_ur": "R"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -75.59,
+       6.24
+      ],
+      [
+       -75.58,
+       6.24
+      ],
+      [
+       -75.58,
+       6.25
+      ],
+      [
+       -75.59,
+       6.25
+      ],
+      [
+       -75.59,
+       6.24
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "codigo": "1103",
+    "nombre_barrio": "Naranjal",
+    "comuna": "11",
+    "nombre_comuna": "LAURELES",
+    "indicador_ur": "U"
+   }
+  },
+  {
+   "type": "Feature",
+   "geometry": {
+    "type": "Polygon",
+    "coordinates": [
+     [
+      [
+       -75.6,
+       6.24
+      ],
+      [
+       -75.58999999999999,
+       6.24
+      ],
+      [
+       -75.58999999999999,
+       6.25
+      ],
+      [
+       -75.6,
+       6.25
+      ],
+      [
+       -75.6,
+       6.24
+      ]
+     ]
+    ]
+   },
+   "properties": {
+    "codigo": "1101",
+    "nombre_barrio": "Laureles",
+    "comuna": "11",
+    "nombre_comuna": "LAURELES",
+    "indicador_ur": "U"
+   }
+  }
+ ]
+}

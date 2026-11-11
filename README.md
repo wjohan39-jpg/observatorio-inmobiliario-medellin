@@ -19,9 +19,14 @@ Proyecto de análisis de datos de punta a punta: **extrae** anuncios de inmobili
 
 ```bash
 uv sync
+uv run observatorio scrape puertabierta             # ~30 s
 uv run observatorio scrape alnago                   # ~30 s
 uv run observatorio scrape uribienes                # ~3 min
 uv run observatorio scrape nutibara                 # ~5 min
+uv run observatorio scrape maxibienes               # ~15 min
+uv run observatorio scrape villacruz                # ~18 min
+uv run observatorio scrape activourbano             # ~20 min
+uv run observatorio scrape panorama                 # ~24 min
 uv run observatorio scrape santafe                  # puede tardar más de 40 min (pide cada detalle)
 uv run observatorio scrape santafe --max-paginas 2  # corrida corta de prueba (~1,5 min)
 uv run observatorio scrape --help                   # todas las opciones
@@ -37,16 +42,21 @@ df = leer_observaciones(Path("data/crudo"))  # todas las fuentes
 df = leer_observaciones(Path("data/crudo"), "santafe")  # una sola fuente
 ```
 
-Fuentes disponibles:
+Fuentes disponibles (corridas del 2026-11-11):
 
-| Fuente | Inmobiliaria | Cómo se obtienen los datos | Cobertura |
-|---|---|---|---|
-| `santafe` | Arrendamientos Santa Fe | API JSON, con detalle de cada anuncio | Arriendo y venta |
-| `nutibara` | Arrendamientos Nutibara | API JSON que busca en un radio de ~3 km; se recorre una cuadrícula de 60 puntos | Valle de Aburrá |
-| `uribienes` | Uribienes | API JSON, consultada municipio por municipio | Valle de Aburrá |
-| `alnago` | Alnago | API JSON del mapa, una petición por municipio y operación | Valle de Aburrá (sin estrato) |
+| Fuente | Inmobiliaria | Cómo se obtienen los datos | Anuncios | Tiempo |
+|---|---|---|---|---|
+| `santafe` | Arrendamientos Santa Fe | API JSON, con detalle de cada anuncio | — | > 40 min |
+| `nutibara` | Arrendamientos Nutibara | API JSON que busca en un radio de ~3 km; se recorre una cuadrícula de 60 puntos | 982 | ~5 min |
+| `uribienes` | Uribienes | API JSON, consultada municipio por municipio | 727 | ~3 min |
+| `alnago` | Alnago | API JSON del mapa, una petición por municipio y operación (sin estrato) | 1.691 | ~30 s |
+| `puertabierta` | Puertabierta | Datos de la página (Next.js), municipio por municipio; solo arriendo | 376 | ~30 s |
+| `maxibienes` | Maxibienes | HTML del buscador, por operación y municipio (sin páginas de detalle) | 2.499 | ~15 min |
+| `activourbano` | Activo Urbano | HTML del catálogo (WordPress), con detalle para estrato y parqueaderos | 478 | ~20 min |
+| `panorama` | Arrendamientos Panorama | HTML (ASP), por operación, tipo y municipio; ficha solo para vivienda | 1.106 | ~24 min |
+| `villacruz` | Arrendamientos Villacruz | Sitemap y página de detalle; solo inventario propio (sin ventas compartidas MLS) | 682 | ~18 min |
 
-Las demás fuentes se agregan en los siguientes planes de la [hoja de ruta](docs/superpowers/plans/2026-11-10-hoja-de-ruta.md).
+Todas cubren el Valle de Aburrá. Los tiempos dependen del límite de velocidad, que es deliberadamente conservador.
 
 ## Desarrollo
 

@@ -81,3 +81,41 @@ def parsear_decimal(valor: ValorCrudo) -> float | None:
     if numero is None or numero <= 0:
         return None
     return numero
+
+
+def parsear_coordenada(valor: ValorCrudo) -> float | None:
+    """Latitud o longitud en grados. Conserva el signo negativo de los textos.
+
+    Devuelve ``None`` si no hay valor, si es ``0`` (muchas API lo usan para "sin
+    ubicación") o si está fuera de rango (más de 180 grados).
+
+    >>> parsear_coordenada("-75.5812")
+    -75.5812
+    >>> parsear_coordenada(0) is None
+    True
+    """
+    if valor is None or isinstance(valor, bool):
+        return None
+    if isinstance(valor, str):
+        # No se usa _a_numero: su patrón ignora el signo "-" y las longitudes son negativas.
+        try:
+            numero = float(valor.strip())
+        except ValueError:
+            return None
+    else:
+        numero = float(valor)
+    if math.isnan(numero) or numero == 0 or abs(numero) > 180:
+        return None
+    return numero
+
+
+def parsear_estrato(valor: ValorCrudo) -> int | None:
+    """Estrato socioeconómico, de 1 a 6. Otro valor, como el ``0`` de "sin dato", es ``None``.
+
+    >>> parsear_estrato("Estrato 4")
+    4
+    >>> parsear_estrato(0) is None
+    True
+    """
+    estrato = parsear_entero(valor)
+    return estrato if estrato is not None and 1 <= estrato <= 6 else None

@@ -4,8 +4,10 @@ import pytest
 
 from observatorio_inmobiliario.parseo import (
     ValorCrudo,
+    parsear_coordenada,
     parsear_decimal,
     parsear_entero,
+    parsear_estrato,
     parsear_precio,
 )
 
@@ -82,3 +84,32 @@ def test_parsear_decimal(entrada: ValorCrudo, esperado: float | None) -> None:
         assert resultado is None
     else:
         assert resultado == pytest.approx(esperado)
+
+
+@pytest.mark.parametrize(
+    ("valor", "esperado"),
+    [
+        (6.2442, 6.2442),
+        (-75.5812, -75.5812),
+        ("-75.170916308256", -75.170916308256),
+        (" 6.24 ", 6.24),
+        (0, None),
+        ("0", None),
+        ("", None),
+        ("sin dato", None),
+        (None, None),
+        (True, None),
+        (float("nan"), None),
+        (181, None),
+    ],
+)
+def test_parsear_coordenada(valor: ValorCrudo, esperado: float | None) -> None:
+    assert parsear_coordenada(valor) == esperado
+
+
+@pytest.mark.parametrize(
+    ("valor", "esperado"),
+    [(3, 3), ("5", 5), ("Estrato 4", 4), (0, None), (7, None), (None, None), ("", None)],
+)
+def test_parsear_estrato(valor: ValorCrudo, esperado: int | None) -> None:
+    assert parsear_estrato(valor) == esperado

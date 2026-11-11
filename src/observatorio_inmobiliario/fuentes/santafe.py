@@ -16,7 +16,13 @@ from pydantic import ValidationError
 
 from observatorio_inmobiliario.http import ClienteCortes, ErrorDeDescarga
 from observatorio_inmobiliario.modelos import AnuncioNormalizado
-from observatorio_inmobiliario.parseo import parsear_decimal, parsear_entero, parsear_precio
+from observatorio_inmobiliario.parseo import (
+    parsear_coordenada,
+    parsear_decimal,
+    parsear_entero,
+    parsear_estrato,
+    parsear_precio,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,11 +34,6 @@ OFERTAS: Final = ("Arriendo", "Venta")
 def _primero(*valores: Any) -> Any:
     """El primer valor que no sea ``None``. Así el detalle tiene prioridad sobre el listado."""
     return next((v for v in valores if v is not None), None)
-
-
-def _coordenada(valor: Any) -> float | None:
-    """La API usa ``0`` cuando no tiene la ubicación; eso no es una coordenada real."""
-    return float(valor) if isinstance(valor, int | float) and valor != 0 else None
 
 
 def mapear_anuncio(
@@ -49,8 +50,8 @@ def mapear_anuncio(
     if isinstance(url, str) and url.startswith("/"):
         url = URL_BASE + url
 
-    latitud = _coordenada(_primero(d.get("lat"), resultado.get("lat")))
-    longitud = _coordenada(_primero(d.get("lng"), resultado.get("lng")))
+    latitud = parsear_coordenada(_primero(d.get("lat"), resultado.get("lat")))
+    longitud = parsear_coordenada(_primero(d.get("lng"), resultado.get("lng")))
     if d.get("tiene_coords") is False:
         latitud = longitud = None
 
@@ -71,7 +72,7 @@ def mapear_anuncio(
             ),
             "banos": parsear_entero(_primero(d.get("banos"), resultado.get("bathrooms"))),
             "parqueaderos": parsear_entero(d.get("parqueaderos")),
-            "estrato": parsear_entero(d.get("estrato")),
+            "estrato": parsear_estrato(d.get("estrato")),
             "barrio": _primero(d.get("sector"), resultado.get("location")),
             "municipio": _primero(d.get("ciudad"), resultado.get("ciudad")),
             "latitud": latitud,

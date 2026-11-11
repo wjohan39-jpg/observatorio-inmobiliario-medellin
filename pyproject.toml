@@ -12,6 +12,7 @@ dependencies = [
     "protego>=0.7.0",
     "pyarrow>=26.0.1",
     "pydantic>=2",
+    "selectolax>=1.0.2",
 ]
 
 [project.scripts]

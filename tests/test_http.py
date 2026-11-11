@@ -63,6 +63,18 @@ def test_get_texto_devuelve_html(sitio: respx.MockRouter, cliente: ClienteCortes
     assert cliente.get_texto("/listado") == "<html>hola</html>"
 
 
+def test_get_bytes_devuelve_el_cuerpo_sin_decodificar(
+    sitio: respx.MockRouter, cliente: ClienteCortes
+) -> None:
+    """Algunos sitios declaran UTF-8 pero envían cp1252: se decodifica aparte, a mano."""
+    cuerpo = "Itagüí".encode("cp1252")
+    sitio.get("/x").respond(
+        200, content=cuerpo, headers={"Content-Type": "text/html; charset=utf-8"}
+    )
+
+    assert cliente.get_bytes("/x") == cuerpo
+
+
 def test_envia_params(sitio: respx.MockRouter, cliente: ClienteCortes) -> None:
     ruta = sitio.get("/api/items", params={"page": "2"}).respond(200, json=[])
     cliente.get_json("/api/items", params={"page": 2})

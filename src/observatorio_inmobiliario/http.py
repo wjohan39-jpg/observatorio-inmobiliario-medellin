@@ -86,6 +86,13 @@ class ClienteCortes:
         """Pide ``ruta`` y devuelve el cuerpo como texto (HTML)."""
         return self._get_permitido(ruta, params).text
 
+    def get_bytes(self, ruta: str, params: Parametros | None = None) -> bytes:
+        """Pide ``ruta`` y devuelve el cuerpo sin decodificar.
+
+        Para sitios que declaran mal su codificación; ver :func:`html.decodificar`.
+        """
+        return self._get_permitido(ruta, params).content
+
     def cerrar(self) -> None:
         self._http.close()
 

@@ -1,0 +1,53 @@
+{
+  "code": 200,
+  "success": true,
+  "data": {
+    "total": 2,
+    "promotions": [
+      {
+        "id": 68776,
+        "sellValue": 3600000,
+        "rentValue": 3600000,
+        "status": "PROMOCION",
+        "createdAt": "2023-11-30T11:58:01.000Z",
+        "keys": false,
+        "property": {
+          "id": 37020,
+          "type": "APARTAMENTO",
+          "neighborhood": "CONQUISTADORES",
+          "sector": "OCCIDENTE",
+          "city": "MEDELLIN",
+          "latitude": 6.2426,
+          "longitude": -75.5828,
+          "stratum": 5,
+          "facilities": [
+            {"id": 1, "value": "170", "facility": {"id": 112, "name": "Area"}},
+            {"id": 2, "value": "3", "facility": {"id": 82, "name": "Alcobas"}},
+            {"id": 3, "value": "2", "facility": {"id": 105, "name": "Baños"}}
+          ]
+        }
+      },
+      {
+        "id": 72012,
+        "sellValue": 2300000,
+        "rentValue": 2300000,
+        "status": "PROMOCION",
+        "createdAt": "2025-01-10T08:56:20.000Z",
+        "keys": false,
+        "property": {
+          "id": 38148,
+          "type": "LOCAL",
+          "neighborhood": "CONQUISTADORES",
+          "sector": "OCCIDENTE",
+          "city": "MEDELLIN",
+          "latitude": 6.24013,
+          "longitude": -75.5845,
+          "stratum": 0,
+          "facilities": [
+            {"id": 4, "value": "35", "facility": {"id": 112, "name": "Area"}}
+          ]
+        }
+      }
+    ]
+  }
+}

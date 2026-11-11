@@ -1,0 +1,32 @@
+{
+  "code": 200,
+  "success": true,
+  "data": {
+    "total": 1,
+    "promotions": [
+      {
+        "id": 70001,
+        "sellValue": 335000000,
+        "rentValue": 335000000,
+        "status": "VENTAS - MLS",
+        "createdAt": "2025-03-02T10:00:00.000Z",
+        "keys": false,
+        "property": {
+          "id": 39001,
+          "type": "APARTAMENTO",
+          "neighborhood": "LAURELES",
+          "sector": "OCCIDENTE",
+          "city": "MEDELLIN",
+          "latitude": 6.245,
+          "longitude": -75.59,
+          "stratum": 0,
+          "facilities": [
+            {"id": 5, "value": "80", "facility": {"id": 112, "name": "Area"}},
+            {"id": 6, "value": "2", "facility": {"id": 82, "name": "Alcobas"}},
+            {"id": 7, "value": "2", "facility": {"id": 105, "name": "Baños"}}
+          ]
+        }
+      }
+    ]
+  }
+}

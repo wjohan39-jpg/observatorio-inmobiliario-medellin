@@ -175,14 +175,25 @@ class FuenteVillacruz:
         slugs = slugs_propios(self._cliente.get_texto(RUTA_SITEMAP))
         if self._max_detalles is not None:
             slugs = slugs[: self._max_detalles]
+        vistos: set[tuple[Operacion, str]] = set()
         for slug in slugs:
             propiedad = self._propiedad(slug)
             if propiedad is None:
                 continue
+            if str(propiedad.get("code")) != slug.rsplit("-", 1)[-1]:
+                # Un slug viejo puede redirigir a la página de otro anuncio.
+                logger.warning("Anuncio %s omitido: la página es de otro anuncio", slug)
+                continue
             try:
-                yield mapear_anuncio(propiedad, slug, self._fecha)
+                anuncio = mapear_anuncio(propiedad, slug, self._fecha)
             except ValidationError as error:
                 logger.warning("Anuncio %s omitido por datos inválidos: %s", slug, error)
+                continue
+            # El sitemap puede listar el mismo anuncio con un slug viejo y uno nuevo.
+            clave = (anuncio.operacion, anuncio.id_fuente)
+            if clave not in vistos:
+                vistos.add(clave)
+                yield anuncio
 
     def _propiedad(self, slug: str) -> dict[str, Any] | None:
         try:

@@ -202,3 +202,27 @@ def test_max_paginas_limita_detalles(sitio: respx.MockRouter, cliente: ClienteCo
 
     assert detalles.call_count == 24  # 2 × 12
     assert len(anuncios) == 24
+
+
+def test_codigo_repetido_sale_una_vez(sitio: respx.MockRouter, cliente: ClienteCortes) -> None:
+    """El sitemap puede listar el mismo anuncio con un slug viejo y uno nuevo."""
+    viejo = "casa-enarriendo-en-bello-53744"
+    sitio.get(RUTA_SITEMAP).respond(200, text=_sitemap([BELLO, viejo]))
+    sitio.get(path__startswith="/detalle-propiedad/").respond(
+        200, text=_leer("detalle_arriendo_bello.html")
+    )
+
+    assert [a.id_fuente for a in FuenteVillacruz(cliente).listar_anuncios()] == ["53744"]
+
+
+def test_redireccion_a_otro_anuncio_se_omite(
+    sitio: respx.MockRouter, cliente: ClienteCortes, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Si el código de la página no es el del slug, la página es de otro anuncio."""
+    ajeno = "apartamento-enarriendo-en-belen-77777"
+    sitio.get(RUTA_SITEMAP).respond(200, text=_sitemap([ajeno]))
+    sitio.get(f"/detalle-propiedad/{ajeno}").respond(200, text=_leer("detalle_arriendo_bello.html"))
+
+    with caplog.at_level(logging.WARNING):
+        assert list(FuenteVillacruz(cliente).listar_anuncios()) == []
+    assert ajeno in caplog.text

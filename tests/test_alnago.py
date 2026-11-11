@@ -117,7 +117,7 @@ def test_anuncio_invalido_se_omite(
     mapa: dict[str, Any],
     caplog: pytest.LogCaptureFixture,
 ) -> None:
-    invalido = {**mapa["items"][0], "id_property": 1, "beds": 99}
+    invalido = {k: v for k, v in mapa["items"][0].items() if k != "id_property"}
     sitio.get(RUTA, params__contains={"id_city": "496", "for_rent": "true"}).respond(
         200, json={"total": 2, "items": [invalido, mapa["items"][1]]}
     )
@@ -128,3 +128,12 @@ def test_anuncio_invalido_se_omite(
 
     assert [a.id_fuente for a in anuncios] == ["4283268"]
     assert "omitido" in caplog.text
+
+
+def test_valores_fuera_de_rango_no_tumban_el_anuncio(mapa: dict[str, Any]) -> None:
+    item = {**mapa["items"][0], "area": 150_000, "beds": -1, "garages": 99, "lat": 95}
+
+    a = mapear_anuncio(item, Operacion.VENTA, "Medellín", FECHA)
+
+    assert a.area_m2 is None and a.habitaciones is None and a.parqueaderos is None
+    assert a.latitud is None and a.precio == 1_950_000

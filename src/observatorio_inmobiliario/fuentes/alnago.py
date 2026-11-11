@@ -25,9 +25,9 @@ from pydantic import ValidationError
 from observatorio_inmobiliario.http import ClienteCortes
 from observatorio_inmobiliario.modelos import AnuncioNormalizado, Operacion
 from observatorio_inmobiliario.parseo import (
+    parsear_area,
+    parsear_conteo,
     parsear_coordenada,
-    parsear_decimal,
-    parsear_entero,
     parsear_precio,
 )
 
@@ -80,7 +80,7 @@ def mapear_anuncio(
 ) -> AnuncioNormalizado:
     """Convierte un item del mapa en un anuncio de la ``operacion`` y el ``municipio`` consultados.
 
-    Lanza ``ValidationError`` si no es válido, p. ej. un número absurdo de habitaciones.
+    Lanza ``ValidationError`` si no es válido, p. ej. si no trae ``id_property``.
     """
     id_ = item.get("id_property")
     tipo = item.get("id_property_type")
@@ -94,13 +94,13 @@ def mapear_anuncio(
             "operacion": operacion,
             "tipo_inmueble": TIPOS.get(tipo) if isinstance(tipo, int) else None,
             "precio": parsear_precio(item.get("price")),
-            "area_m2": parsear_decimal(item.get("area")),
-            "habitaciones": parsear_entero(item.get("beds")),
-            "banos": parsear_entero(item.get("baths")),
-            "parqueaderos": parsear_entero(item.get("garages")),
+            "area_m2": parsear_area(item.get("area")),
+            "habitaciones": parsear_conteo(item.get("beds")),
+            "banos": parsear_conteo(item.get("baths")),
+            "parqueaderos": parsear_conteo(item.get("garages")),
             "barrio": item.get("zone"),
             "municipio": municipio,
-            "latitud": parsear_coordenada(item.get("lat")),
+            "latitud": parsear_coordenada(item.get("lat"), limite=90),
             "longitud": parsear_coordenada(item.get("lng")),
         }
     )

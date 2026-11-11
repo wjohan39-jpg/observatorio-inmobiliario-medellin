@@ -17,9 +17,9 @@ from pydantic import ValidationError
 from observatorio_inmobiliario.http import ClienteCortes, ErrorDeDescarga
 from observatorio_inmobiliario.modelos import AnuncioNormalizado
 from observatorio_inmobiliario.parseo import (
+    parsear_area,
+    parsear_conteo,
     parsear_coordenada,
-    parsear_decimal,
-    parsear_entero,
     parsear_estrato,
     parsear_precio,
 )
@@ -50,7 +50,7 @@ def mapear_anuncio(
     if isinstance(url, str) and url.startswith("/"):
         url = URL_BASE + url
 
-    latitud = parsear_coordenada(_primero(d.get("lat"), resultado.get("lat")))
+    latitud = parsear_coordenada(_primero(d.get("lat"), resultado.get("lat")), limite=90)
     longitud = parsear_coordenada(_primero(d.get("lng"), resultado.get("lng")))
     if d.get("tiene_coords") is False:
         latitud = longitud = None
@@ -66,12 +66,12 @@ def mapear_anuncio(
             "operacion": oferta.lower() if isinstance(oferta, str) else oferta,
             "tipo_inmueble": _primero(d.get("tipo"), resultado.get("type")),
             "precio": parsear_precio(_primero(d.get("price_raw"), resultado.get("price_raw"))),
-            "area_m2": parsear_decimal(_primero(d.get("area"), resultado.get("size"))),
-            "habitaciones": parsear_entero(
+            "area_m2": parsear_area(_primero(d.get("area"), resultado.get("size"))),
+            "habitaciones": parsear_conteo(
                 _primero(d.get("habitaciones"), resultado.get("bedrooms"))
             ),
-            "banos": parsear_entero(_primero(d.get("banos"), resultado.get("bathrooms"))),
-            "parqueaderos": parsear_entero(d.get("parqueaderos")),
+            "banos": parsear_conteo(_primero(d.get("banos"), resultado.get("bathrooms"))),
+            "parqueaderos": parsear_conteo(d.get("parqueaderos")),
             "estrato": parsear_estrato(d.get("estrato")),
             "barrio": _primero(d.get("sector"), resultado.get("location")),
             "municipio": _primero(d.get("ciudad"), resultado.get("ciudad")),

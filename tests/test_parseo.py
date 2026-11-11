@@ -1,9 +1,11 @@
 import math
+from typing import Any
 
 import pytest
 
 from observatorio_inmobiliario.parseo import (
     ValorCrudo,
+    parsear_area,
     parsear_conteo,
     parsear_coordenada,
     parsear_decimal,
@@ -122,3 +124,44 @@ def test_parsear_estrato(valor: ValorCrudo, esperado: int | None) -> None:
 )
 def test_parsear_conteo(valor: ValorCrudo, esperado: int | None) -> None:
     assert parsear_conteo(valor) == esperado
+
+
+@pytest.mark.parametrize(
+    ("valor", "esperado"),
+    [
+        (85, 85.0),
+        ("85,5 m²", 85.5),
+        (99_999, 99_999.0),
+        (100_000, None),
+        (770_000, None),
+        (0, None),
+    ],
+)
+def test_parsear_area(valor: ValorCrudo, esperado: float | None) -> None:
+    """Fuera de 0 < área < 100 000 m² (el rango del modelo) queda nulo y no tumba el anuncio."""
+    assert parsear_area(valor) == esperado
+
+
+@pytest.mark.parametrize(
+    ("funcion", "valor"),
+    [
+        (parsear_conteo, "-1"),
+        (parsear_estrato, "-3"),
+        (parsear_precio, "-5"),
+        (parsear_decimal, "-85"),
+        (parsear_area, "-85"),
+    ],
+)
+def test_texto_negativo_no_se_vuelve_positivo(funcion: Any, valor: str) -> None:
+    """Un "-1" de "sin dato" no debe convertirse en 1."""
+    assert funcion(valor) is None
+
+
+def test_parsear_entero_conserva_el_signo() -> None:
+    assert parsear_entero("-3") == -3
+
+
+def test_latitud_fuera_de_rango_queda_nula() -> None:
+    assert parsear_coordenada(95, limite=90) is None
+    assert parsear_coordenada(6.24, limite=90) == 6.24
+    assert parsear_coordenada(-120.5) == -120.5

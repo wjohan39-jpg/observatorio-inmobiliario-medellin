@@ -181,3 +181,9 @@ def test_conteo_negativo_queda_nulo_sin_perder_el_anuncio(listado: dict[str, Any
 
     assert a.parqueaderos is None and a.banos is None
     assert a.habitaciones == 3
+
+
+def test_area_enorme_queda_nula_sin_perder_el_anuncio(listado: dict[str, Any]) -> None:
+    a = mapear_anuncio({**listado["data"][0], "area_cons": 200_000}, Operacion.ARRIENDO, FECHA)
+
+    assert a.area_m2 is None and a.precio == 2_500_000

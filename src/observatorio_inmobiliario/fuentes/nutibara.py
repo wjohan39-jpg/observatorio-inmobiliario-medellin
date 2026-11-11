@@ -24,9 +24,9 @@ from pydantic import ValidationError
 from observatorio_inmobiliario.http import ClienteCortes, ErrorDeDescarga
 from observatorio_inmobiliario.modelos import AnuncioNormalizado, Operacion
 from observatorio_inmobiliario.parseo import (
+    parsear_area,
+    parsear_conteo,
     parsear_coordenada,
-    parsear_decimal,
-    parsear_entero,
     parsear_estrato,
     parsear_precio,
 )
@@ -132,13 +132,13 @@ def mapear_anuncio(promocion: dict[str, Any], fecha: date) -> AnuncioNormalizado
             "operacion": operacion,
             "tipo_inmueble": inmueble.get("type"),
             "precio": parsear_precio(precio),
-            "area_m2": parsear_decimal(datos.get(_AREA)),
-            "habitaciones": parsear_entero(datos.get(_ALCOBAS)),
-            "banos": parsear_entero(datos.get(_BANOS)),
+            "area_m2": parsear_area(datos.get(_AREA)),
+            "habitaciones": parsear_conteo(datos.get(_ALCOBAS)),
+            "banos": parsear_conteo(datos.get(_BANOS)),
             "estrato": parsear_estrato(inmueble.get("stratum")),
             "barrio": inmueble.get("neighborhood"),
             "municipio": inmueble.get("city"),
-            "latitud": parsear_coordenada(inmueble.get("latitude")),
+            "latitud": parsear_coordenada(inmueble.get("latitude"), limite=90),
             "longitud": parsear_coordenada(inmueble.get("longitude")),
             # La API marca el inventario MLS, pero no dice qué agencia lo publicó.
             "anunciante_origen": None,

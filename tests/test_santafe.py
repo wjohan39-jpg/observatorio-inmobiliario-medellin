@@ -229,3 +229,14 @@ def test_anuncio_invalido_se_omite(
 
     assert [a.id_fuente for a in anuncios] == [r["codigo"] for r in validos]
     assert invalido["codigo"] in caplog.text
+
+
+def test_valores_fuera_de_rango_no_tumban_el_anuncio(
+    listado: dict[str, Any], detalle: dict[str, Any]
+) -> None:
+    raro = {**detalle, "area": 200_000, "habitaciones": -1, "parqueaderos": 99, "lat": 95}
+
+    anuncio = mapear_anuncio(listado["results"][0], raro, FECHA)
+
+    assert anuncio.area_m2 is None and anuncio.habitaciones is None
+    assert anuncio.parqueaderos is None and anuncio.latitud is None

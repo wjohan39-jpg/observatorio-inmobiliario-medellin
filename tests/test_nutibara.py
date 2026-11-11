@@ -252,3 +252,21 @@ def test_404_sin_elementos_es_un_centro_vacio(
 
     assert [a.id_fuente for a in anuncios] == ["1"]
     assert vacio.call_count == 2  # una por operación, sin reintentos
+
+
+def test_valores_fuera_de_rango_no_tumban_el_anuncio(arriendo: dict[str, Any]) -> None:
+    promocion = arriendo["data"]["promotions"][0]
+    inmueble = {
+        **promocion["property"],
+        "latitude": 95,
+        "facilities": [
+            {"id": 1, "value": "770000", "facility": {"id": 112, "name": "Area"}},
+            {"id": 2, "value": "-1", "facility": {"id": 82, "name": "Alcobas"}},
+            {"id": 3, "value": "99", "facility": {"id": 105, "name": "Baños"}},
+        ],
+    }
+
+    a = mapear_anuncio({**promocion, "property": inmueble}, FECHA)
+
+    assert a.area_m2 is None and a.habitaciones is None and a.banos is None
+    assert a.latitud is None and a.precio == 3_600_000

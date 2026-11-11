@@ -13,7 +13,7 @@ import re
 type ValorCrudo = str | int | float | None
 """Lo que puede llegar desde un sitio web para un campo numérico."""
 
-_PATRON_NUMERO = re.compile(r"\d[\d.,]*")
+_PATRON_NUMERO = re.compile(r"-?\d[\d.,]*")
 _MILES_CON_PUNTO = re.compile(r"^\d{1,3}(\.\d{3})+$")
 _MILES_CON_COMA = re.compile(r"^\d{1,3}(,\d{3})+$")
 
@@ -30,6 +30,8 @@ def _a_numero(valor: ValorCrudo) -> float | None:
     if coincidencia is None:
         return None
     texto = coincidencia.group().rstrip(".,")
+    signo = -1.0 if texto.startswith("-") else 1.0
+    texto = texto.lstrip("-")
 
     if "." in texto and "," in texto:
         # El separador que aparece de último es el decimal: "1.200.000,50" o "1,200,000.50".
@@ -42,7 +44,7 @@ def _a_numero(valor: ValorCrudo) -> float | None:
         texto = texto.replace(".", "")
 
     try:
-        return float(texto)
+        return signo * float(texto)
     except ValueError:
         return None
 
@@ -83,11 +85,27 @@ def parsear_decimal(valor: ValorCrudo) -> float | None:
     return numero
 
 
-def parsear_coordenada(valor: ValorCrudo) -> float | None:
+AREA_MAXIMA_M2 = 100_000
+"""Mismo límite del modelo. Un área mayor (10 ha o más) se trata como dato no confiable."""
+
+
+def parsear_area(valor: ValorCrudo) -> float | None:
+    """Área en m². Devuelve ``None`` si es ≤ 0 o de ``AREA_MAXIMA_M2`` o más.
+
+    >>> parsear_area("85,5 m²")
+    85.5
+    >>> parsear_area(770_000) is None
+    True
+    """
+    area = parsear_decimal(valor)
+    return area if area is not None and area < AREA_MAXIMA_M2 else None
+
+
+def parsear_coordenada(valor: ValorCrudo, limite: float = 180) -> float | None:
     """Latitud o longitud en grados. Conserva el signo negativo de los textos.
 
     Devuelve ``None`` si no hay valor, si es ``0`` (muchas API lo usan para "sin
-    ubicación") o si está fuera de rango (más de 180 grados).
+    ubicación") o si pasa de ``limite`` grados: 180 para longitud, 90 para latitud.
 
     >>> parsear_coordenada("-75.5812")
     -75.5812
@@ -104,7 +122,7 @@ def parsear_coordenada(valor: ValorCrudo) -> float | None:
             return None
     else:
         numero = float(valor)
-    if math.isnan(numero) or numero == 0 or abs(numero) > 180:
+    if math.isnan(numero) or numero == 0 or abs(numero) > limite:
         return None
     return numero
 

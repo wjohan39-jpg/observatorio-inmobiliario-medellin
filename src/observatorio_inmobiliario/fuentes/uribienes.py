@@ -22,9 +22,9 @@ from pydantic import ValidationError
 from observatorio_inmobiliario.http import ClienteCortes
 from observatorio_inmobiliario.modelos import AnuncioNormalizado, Operacion
 from observatorio_inmobiliario.parseo import (
+    parsear_area,
     parsear_conteo,
     parsear_coordenada,
-    parsear_decimal,
     parsear_estrato,
     parsear_precio,
 )
@@ -72,14 +72,14 @@ def mapear_anuncio(
             # parsear_precio convierte los 0 ("sin dato") en None.
             "precio": parsear_precio(precio),
             "administracion": parsear_precio(inmueble.get("administration")),
-            "area_m2": parsear_decimal(inmueble.get("area_cons")),
+            "area_m2": parsear_area(inmueble.get("area_cons")),
             "habitaciones": parsear_conteo(inmueble.get("bedrooms")),
             "banos": parsear_conteo(inmueble.get("bathrooms")),
             "parqueaderos": parsear_conteo(inmueble.get("parking")),
             "estrato": parsear_estrato(inmueble.get("stratum")),
             "barrio": inmueble.get("neighborhood"),
             "municipio": inmueble.get("city"),
-            "latitud": parsear_coordenada(inmueble.get("latitude")),
+            "latitud": parsear_coordenada(inmueble.get("latitude"), limite=90),
             "longitud": parsear_coordenada(inmueble.get("longitude")),
         }
     )

@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from observatorio_inmobiliario.fuentes import (
+    activourbano,
     alnago,
     maxibienes,
     nutibara,
@@ -43,6 +44,9 @@ REGISTRO: dict[str, RegistroFuente] = {
     # El servidor de Maxibienes a veces tarda más de 30 s en una página.
     maxibienes.FuenteMaxibienes.nombre: RegistroFuente(
         maxibienes.URL_BASE, maxibienes.FuenteMaxibienes, timeout=90.0, max_intentos=5
+    ),
+    activourbano.FuenteActivoUrbano.nombre: RegistroFuente(
+        activourbano.URL_BASE, activourbano.FuenteActivoUrbano
     ),
 }
 

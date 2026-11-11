@@ -5,7 +5,14 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
-from observatorio_inmobiliario.fuentes import alnago, nutibara, puertabierta, santafe, uribienes
+from observatorio_inmobiliario.fuentes import (
+    alnago,
+    maxibienes,
+    nutibara,
+    puertabierta,
+    santafe,
+    uribienes,
+)
 from observatorio_inmobiliario.fuentes.base import Fuente
 from observatorio_inmobiliario.http import ClienteCortes
 
@@ -14,10 +21,15 @@ __all__ = ["REGISTRO", "Fuente", "RegistroFuente", "crear_fuente"]
 
 @dataclass(frozen=True)
 class RegistroFuente:
-    """Lo necesario para crear una fuente: el sitio al que se conecta y su adaptador."""
+    """Lo necesario para crear una fuente: el sitio al que se conecta y su adaptador.
+
+    ``timeout`` y ``max_intentos`` se ajustan por sitio: algunos servidores son lentos.
+    """
 
     url_base: str
     crear: Callable[..., Fuente]
+    timeout: float = 30.0
+    max_intentos: int = 3
 
 
 REGISTRO: dict[str, RegistroFuente] = {
@@ -27,6 +39,10 @@ REGISTRO: dict[str, RegistroFuente] = {
     alnago.FuenteAlnago.nombre: RegistroFuente(alnago.URL_BASE, alnago.FuenteAlnago),
     puertabierta.FuentePuertabierta.nombre: RegistroFuente(
         puertabierta.URL_BASE, puertabierta.FuentePuertabierta
+    ),
+    # El servidor de Maxibienes a veces tarda más de 30 s en una página.
+    maxibienes.FuenteMaxibienes.nombre: RegistroFuente(
+        maxibienes.URL_BASE, maxibienes.FuenteMaxibienes, timeout=90.0, max_intentos=5
     ),
 }
 
@@ -43,5 +59,7 @@ def crear_fuente(nombre: str, **opciones: Any) -> Iterator[Fuente]:
     if registro is None:
         disponibles = ", ".join(sorted(REGISTRO))
         raise ValueError(f"Fuente desconocida {nombre!r}. Disponibles: {disponibles}")
-    with ClienteCortes(registro.url_base) as cliente:
+    with ClienteCortes(
+        registro.url_base, timeout=registro.timeout, max_intentos=registro.max_intentos
+    ) as cliente:
         yield registro.crear(cliente, **opciones)

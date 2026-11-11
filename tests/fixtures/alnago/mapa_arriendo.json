@@ -1,0 +1,29 @@
+{
+  "total": 2,
+  "items": [
+    {
+      "id_property": 10569564,
+      "lat": 6.1512,
+      "lng": -75.6169,
+      "price": 1950000,
+      "beds": 3,
+      "baths": 2,
+      "area": 72.5,
+      "garages": 1,
+      "zone": "María Auxiliadora",
+      "id_property_type": 2
+    },
+    {
+      "id_property": 4283268,
+      "lat": 6.2389,
+      "lng": -75.6004,
+      "price": 0,
+      "beds": 0,
+      "baths": 1,
+      "area": 37.69,
+      "garages": 0,
+      "zone": null,
+      "id_property_type": 99
+    }
+  ]
+}

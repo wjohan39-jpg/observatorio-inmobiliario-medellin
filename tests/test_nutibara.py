@@ -234,3 +234,21 @@ def test_anuncio_invalido_se_omite(
 
     assert [a.id_fuente for a in anuncios] == ["1", "3"]
     assert "2" in caplog.text
+
+
+def test_404_sin_elementos_es_un_centro_vacio(
+    sitio: respx.MockRouter, cliente: ClienteCortes
+) -> None:
+    """La API responde 404 "No elements were found" cuando no hay inmuebles cerca del punto."""
+    sin_elementos = {"code": 404, "success": False, "message": "No elements were found"}
+    vacio = sitio.get(RUTA, params__contains={"latitude": "6.09000"}).respond(
+        404, json=sin_elementos
+    )
+    _simular(sitio, "PROMOCION", _respuesta([_promocion(1)]))
+    _simular(sitio, "VENTAS", _respuesta([]))
+    centros = ((6.09, -75.66), (6.24, -75.58))
+
+    anuncios = list(FuenteNutibara(cliente, centros=centros).listar_anuncios())
+
+    assert [a.id_fuente for a in anuncios] == ["1"]
+    assert vacio.call_count == 2  # una por operación, sin reintentos

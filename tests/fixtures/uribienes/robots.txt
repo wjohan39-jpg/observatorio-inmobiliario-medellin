@@ -1,0 +1,16 @@
+# Permite la indexación de las rutas específicas
+User-agent: *
+Allow: /inmuebles/arriendo
+Allow: /inmuebles/venta
+
+# Excluye la ruta general
+User-agent: *
+Disallow: /inmuebles/[0-9]+
+
+# Instruye a Googlebot para que rastree con una frecuencia media
+User-agent: Googlebot
+Crawl-delay: 3
+
+# Evita que otros robots sigan enlaces externos
+User-agent: *
+Disallow: /?*

@@ -19,7 +19,10 @@ Proyecto de análisis de datos de punta a punta: **extrae** anuncios de inmobili
 
 ```bash
 uv sync
-uv run observatorio scrape santafe                  # corrida completa (puede tardar más de 40 min)
+uv run observatorio scrape alnago                   # ~30 s
+uv run observatorio scrape uribienes                # ~3 min
+uv run observatorio scrape nutibara                 # ~5 min
+uv run observatorio scrape santafe                  # puede tardar más de 40 min (pide cada detalle)
 uv run observatorio scrape santafe --max-paginas 2  # corrida corta de prueba (~1,5 min)
 uv run observatorio scrape --help                   # todas las opciones
 ```
@@ -34,7 +37,16 @@ df = leer_observaciones(Path("data/crudo"))  # todas las fuentes
 df = leer_observaciones(Path("data/crudo"), "santafe")  # una sola fuente
 ```
 
-Fuentes disponibles: `santafe` (Arrendamientos Santa Fe). Las demás se agregan en los siguientes planes de la [hoja de ruta](docs/superpowers/plans/2026-11-10-hoja-de-ruta.md).
+Fuentes disponibles:
+
+| Fuente | Inmobiliaria | Cómo se obtienen los datos | Cobertura |
+|---|---|---|---|
+| `santafe` | Arrendamientos Santa Fe | API JSON, con detalle de cada anuncio | Arriendo y venta |
+| `nutibara` | Arrendamientos Nutibara | API JSON que busca en un radio de ~3 km; se recorre una cuadrícula de 60 puntos | Valle de Aburrá |
+| `uribienes` | Uribienes | API JSON, consultada municipio por municipio | Valle de Aburrá |
+| `alnago` | Alnago | API JSON del mapa, una petición por municipio y operación | Valle de Aburrá (sin estrato) |
+
+Las demás fuentes se agregan en los siguientes planes de la [hoja de ruta](docs/superpowers/plans/2026-11-10-hoja-de-ruta.md).
 
 ## Desarrollo
 

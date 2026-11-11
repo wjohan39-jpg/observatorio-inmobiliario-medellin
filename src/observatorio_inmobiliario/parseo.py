@@ -119,3 +119,15 @@ def parsear_estrato(valor: ValorCrudo) -> int | None:
     """
     estrato = parsear_entero(valor)
     return estrato if estrato is not None and 1 <= estrato <= 6 else None
+
+
+def parsear_conteo(valor: ValorCrudo) -> int | None:
+    """Cantidad de habitaciones, baños o parqueaderos (0 a 50). Otro valor es ``None``.
+
+    Algunas fuentes publican negativos como ``-1`` para "sin dato".
+
+    >>> parsear_conteo(-1) is None
+    True
+    """
+    conteo = parsear_entero(valor)
+    return conteo if conteo is not None and 0 <= conteo <= 50 else None

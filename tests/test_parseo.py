@@ -4,6 +4,7 @@ import pytest
 
 from observatorio_inmobiliario.parseo import (
     ValorCrudo,
+    parsear_conteo,
     parsear_coordenada,
     parsear_decimal,
     parsear_entero,
@@ -113,3 +114,11 @@ def test_parsear_coordenada(valor: ValorCrudo, esperado: float | None) -> None:
 )
 def test_parsear_estrato(valor: ValorCrudo, esperado: int | None) -> None:
     assert parsear_estrato(valor) == esperado
+
+
+@pytest.mark.parametrize(
+    ("valor", "esperado"),
+    [(0, 0), (3, 3), ("2 baños", 2), (50, 50), (-1, None), (51, None), (None, None)],
+)
+def test_parsear_conteo(valor: ValorCrudo, esperado: int | None) -> None:
+    assert parsear_conteo(valor) == esperado

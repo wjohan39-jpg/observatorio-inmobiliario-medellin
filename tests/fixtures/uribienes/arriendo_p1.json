@@ -1,0 +1,50 @@
+{
+  "total": 2,
+  "per_page": 12,
+  "current_page": 1,
+  "last_page": 1,
+  "from": 1,
+  "to": 2,
+  "data": [
+    {
+      "idpro": 3860800,
+      "codpro": 220400,
+      "biz": "ARRIENDO",
+      "type": "APARTAMENTO",
+      "city": "Medellín ",
+      "city_code": 5001,
+      "neighborhood": "Laureles",
+      "rent": 2500000,
+      "saleprice": 0,
+      "price": "2500000",
+      "administration": 350000,
+      "area_cons": 85,
+      "bedrooms": 3,
+      "bathrooms": 2,
+      "parking": 1,
+      "stratum": 5,
+      "latitude": "6.2441",
+      "longitude": "-75.5900"
+    },
+    {
+      "idpro": 3860801,
+      "codpro": 220401,
+      "biz": "ARRIENDO/VENTA",
+      "type": "CASA",
+      "city": "Envigado ",
+      "city_code": 5266,
+      "neighborhood": "Zuñiga",
+      "rent": 1700000,
+      "saleprice": 250000000,
+      "price": "1700000/250000000",
+      "administration": 0,
+      "area_cons": 0,
+      "bedrooms": 4,
+      "bathrooms": 3,
+      "parking": 0,
+      "stratum": 0,
+      "latitude": "0",
+      "longitude": "0"
+    }
+  ]
+}

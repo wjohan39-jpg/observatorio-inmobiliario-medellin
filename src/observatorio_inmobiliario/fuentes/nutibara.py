@@ -8,7 +8,8 @@ El sitio consulta una API JSON en otro host, ``api.arrendamientosnutibara.com``:
 
 La búsqueda solo devuelve inmuebles a unos 3 km del punto dado, y no hay un parámetro para
 ampliar ese radio. Por eso se consulta desde una cuadrícula de puntos que cubre el Valle de
-Aburrá y se descartan los anuncios repetidos entre círculos vecinos.
+Aburrá y se descartan los anuncios repetidos entre círculos vecinos. Cuando no hay inmuebles
+cerca de un punto, la API responde 404 ("No elements were found") en vez de una lista vacía.
 """
 
 import logging
@@ -17,9 +18,10 @@ from collections.abc import Iterator
 from datetime import date
 from typing import Any, Final
 
+import httpx
 from pydantic import ValidationError
 
-from observatorio_inmobiliario.http import ClienteCortes
+from observatorio_inmobiliario.http import ClienteCortes, ErrorDeDescarga
 from observatorio_inmobiliario.modelos import AnuncioNormalizado, Operacion
 from observatorio_inmobiliario.parseo import (
     parsear_coordenada,
@@ -69,6 +71,11 @@ def cuadricula(
 
 CENTROS: Final = cuadricula(6.09, 6.38, -75.66, -75.50, 0.035)
 """Puntos desde los que se busca: cubren el Valle de Aburrá con círculos de ``RADIO_KM``."""
+
+
+def _es_404(error: ErrorDeDescarga) -> bool:
+    causa = error.__cause__
+    return isinstance(causa, httpx.HTTPStatusError) and causa.response.status_code == 404
 
 
 def _slug(texto: str) -> str:
@@ -179,17 +186,12 @@ class FuenteNutibara:
     def _resultados(self, status: str, latitud: float, longitud: float) -> Iterator[dict[str, Any]]:
         pagina = 1
         while True:
-            respuesta = self._cliente.get_json(
-                "/promotion/filter/nearest",
-                params={
-                    # El cliente solo acepta textos y enteros como parámetros.
-                    "latitude": f"{latitud:.5f}",
-                    "longitude": f"{longitud:.5f}",
-                    "page": pagina,
-                    "priceStart": 1,
-                    "status": status,
-                },
-            )
+            try:
+                respuesta = self._buscar(status, latitud, longitud, pagina)
+            except ErrorDeDescarga as error:
+                if _es_404(error):
+                    return  # sin inmuebles cerca de este punto
+                raise
             datos = respuesta.get("data") or {}
             promociones = datos.get("promotions") or []
             yield from promociones
@@ -198,3 +200,16 @@ class FuenteNutibara:
             if self._max_paginas is not None and pagina >= self._max_paginas:
                 return
             pagina += 1
+
+    def _buscar(self, status: str, latitud: float, longitud: float, pagina: int) -> Any:
+        return self._cliente.get_json(
+            "/promotion/filter/nearest",
+            params={
+                # El cliente solo acepta textos y enteros como parámetros.
+                "latitude": f"{latitud:.5f}",
+                "longitude": f"{longitud:.5f}",
+                "page": pagina,
+                "priceStart": 1,
+                "status": status,
+            },
+        )

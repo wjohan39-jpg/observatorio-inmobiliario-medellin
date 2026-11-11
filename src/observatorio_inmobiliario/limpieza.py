@@ -20,9 +20,11 @@ dentro de la ciudad: en los bordes (El Poblado con Envigado) se respeta lo que d
 import math
 from typing import Final
 
+import numpy as np
 import pandas as pd
 
 from observatorio_inmobiliario.catalogo import Catalogo, Ubicacion
+from observatorio_inmobiliario.modelos import Operacion
 from observatorio_inmobiliario.normalizacion import (
     MUNICIPIOS_VALLE,
     normalizar_municipio,
@@ -33,6 +35,20 @@ MEDELLIN: Final = "Medellín"
 VALLE_LAT: Final = (6.00, 6.50)
 VALLE_LON: Final = (-75.72, -75.30)
 """Rectángulo que contiene el Valle de Aburrá; una coordenada fuera de él es un error."""
+
+RANGOS_PRECIO: Final = {
+    Operacion.ARRIENDO: (200_000, 200_000_000),
+    Operacion.VENTA: (20_000_000, 50_000_000_000),
+}
+"""Precios posibles en COP. Fuera de ellos casi siempre es un error de digitación o un
+arriendo publicado con el precio de venta (o al revés)."""
+TIPOS_VIVIENDA: Final = frozenset({"apartamento", "apartaestudio", "casa"})
+RANGO_AREA_VIVIENDA: Final = (10.0, 2_000.0)
+"""Áreas posibles en m² para una vivienda."""
+MINIMO_GRUPO: Final = 30
+"""Filas con precio por m² que necesita un grupo para usar el criterio estadístico."""
+FACTOR_IQR: Final = 3.0
+"""Cercas de Tukey "lejanas": Q1 − 3·IQR y Q3 + 3·IQR, sobre el logaritmo del precio por m²."""
 
 
 def _punto_del_valle(latitud: object, longitud: object) -> tuple[float, float] | None:
@@ -101,4 +117,65 @@ def limpiar(crudo: pd.DataFrame, catalogo: Catalogo) -> pd.DataFrame:
     )
     area = crudo["area_m2"].astype("Float64")
     limpio["precio_m2"] = (crudo["precio"].astype("Float64") / area).where(area > 0)
-    return limpio
+    return marcar_atipicos(limpio)
+
+
+def marcar_atipicos(df: pd.DataFrame) -> pd.DataFrame:
+    """Copia de ``df`` con ``es_atipico`` y ``motivo_atipico``. No borra filas.
+
+    Motivos, unidos con ``"; "`` si hay varios:
+
+    * ``precio_fuera_de_rango``: fuera de :data:`RANGOS_PRECIO` para su operación.
+    * ``area_fuera_de_rango``: vivienda con área fuera de :data:`RANGO_AREA_VIVIENDA`.
+    * ``precio_m2_extremo``: dentro de su grupo (operación y tipo), el logaritmo del precio
+      por m² queda fuera de las cercas de Tukey con :data:`FACTOR_IQR`. Solo en grupos con al
+      menos :data:`MINIMO_GRUPO` filas. Se usa el logaritmo porque los precios son asimétricos.
+
+    Un dato nulo nunca marca un anuncio.
+    """
+    precio = df["precio"].astype("Float64")
+    fuera_de_precio = pd.Series(False, index=df.index)
+    for operacion, (minimo, maximo) in RANGOS_PRECIO.items():
+        fuera = (df["operacion"] == operacion.value) & ((precio < minimo) | (precio > maximo))
+        fuera_de_precio |= fuera.fillna(False).astype(bool)
+
+    area = df["area_m2"].astype("Float64")
+    vivienda = df["tipo_normalizado"].isin(TIPOS_VIVIENDA).fillna(False).astype(bool)
+    fuera_de_area = vivienda & (
+        ((area < RANGO_AREA_VIVIENDA[0]) | (area > RANGO_AREA_VIVIENDA[1])).fillna(False)
+    ).astype(bool)
+
+    log_precio_m2 = pd.Series(
+        np.log10(df["precio_m2"].astype("float64")), index=df.index, dtype="float64"
+    )
+    grupos = log_precio_m2.groupby([df["operacion"], df["tipo_normalizado"]])
+    q1 = grupos.transform("quantile", 0.25)
+    q3 = grupos.transform("quantile", 0.75)
+    iqr = q3 - q1
+    extremo = (grupos.transform("count") >= MINIMO_GRUPO) & (
+        (log_precio_m2 < q1 - FACTOR_IQR * iqr) | (log_precio_m2 > q3 + FACTOR_IQR * iqr)
+    )
+
+    motivos = [
+        "; ".join(
+            nombre
+            for nombre, marcado in (
+                ("precio_fuera_de_rango", p),
+                ("area_fuera_de_rango", a),
+                ("precio_m2_extremo", e),
+            )
+            if marcado
+        )
+        or None
+        for p, a, e in zip(fuera_de_precio, fuera_de_area, extremo.fillna(False), strict=True)
+    ]
+    motivo = pd.Series(motivos, index=df.index, dtype="string")
+    marcado = df.copy()
+    marcado["es_atipico"] = motivo.notna().astype(bool)
+    marcado["motivo_atipico"] = motivo
+    return marcado
+
+
+def filtrar_medellin(df: pd.DataFrame) -> pd.DataFrame:
+    """Solo los anuncios de Medellín (el foco del análisis principal)."""
+    return df[df["es_medellin"]]

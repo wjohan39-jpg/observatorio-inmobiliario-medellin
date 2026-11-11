@@ -11,7 +11,7 @@ from observatorio_inmobiliario.almacenamiento import (
     leer_observaciones,
 )
 from observatorio_inmobiliario.catalogo import Catalogo
-from observatorio_inmobiliario.limpieza import limpiar
+from observatorio_inmobiliario.limpieza import filtrar_medellin, limpiar, marcar_atipicos
 from observatorio_inmobiliario.modelos import AnuncioNormalizado, Operacion
 
 MINI = Path(__file__).parent / "fixtures" / "catalogo" / "mini.geojson"
@@ -207,3 +207,133 @@ def test_tabla_vacia(catalogo: Catalogo) -> None:
 
     assert limpio.empty
     assert {"codigo_barrio", "precio_m2", "es_medellin"} <= set(limpio.columns)
+
+
+# --------------------------------------------------------------------- Atípicos
+
+
+def _apartamentos(n: int, operacion: Operacion = Operacion.ARRIENDO) -> list[dict[str, Any]]:
+    """``n`` apartamentos normales de 50 m² (~40.000 $/m² en arriendo, ~8 M$/m² en venta)."""
+    base = 2_000_000 if operacion is Operacion.ARRIENDO else 400_000_000
+    return [
+        {
+            "operacion": operacion,
+            "tipo_inmueble": "apartamento",
+            "area_m2": 50.0,
+            "precio": base + i * base // 100,
+        }
+        for i in range(n)
+    ]
+
+
+def _motivos(df: pd.DataFrame) -> list[str | None]:
+    return [None if pd.isna(m) else m for m in df["motivo_atipico"]]
+
+
+def test_arriendo_con_precio_de_venta(crudo: Any, catalogo: Catalogo) -> None:
+    fila = _una(limpiar(crudo({"precio": 450_000_000}), catalogo))
+
+    assert fila["es_atipico"]
+    assert fila["motivo_atipico"] == "precio_fuera_de_rango"
+
+
+def test_venta_barata(crudo: Any, catalogo: Catalogo) -> None:
+    fila = _una(limpiar(crudo({"operacion": Operacion.VENTA, "precio": 5_000_000}), catalogo))
+
+    assert fila["motivo_atipico"] == "precio_fuera_de_rango"
+
+
+def test_precio_normal(crudo: Any, catalogo: Catalogo) -> None:
+    fila = _una(limpiar(crudo({"precio": 2_500_000, "area_m2": 60.0}), catalogo))
+
+    assert not fila["es_atipico"]
+    assert pd.isna(fila["motivo_atipico"])
+
+
+def test_apartamento_de_3_m2(crudo: Any, catalogo: Catalogo) -> None:
+    df = limpiar(
+        crudo(
+            {"tipo_inmueble": "apartamento", "area_m2": 3.0, "precio": 1_000_000},
+            {"tipo_inmueble": "lote", "area_m2": 5_000.0, "precio": 3_000_000},
+        ),
+        catalogo,
+    )
+
+    assert _motivos(df) == ["area_fuera_de_rango", None]
+
+
+def test_precio_m2_extremo(crudo: Any, catalogo: Catalogo) -> None:
+    filas = _apartamentos(40)
+    filas.append({"tipo_inmueble": "apartamento", "area_m2": 25.0, "precio": 100_000_000})
+
+    df = limpiar(crudo(*filas), catalogo)
+
+    assert _motivos(df) == [None] * 40 + ["precio_m2_extremo"]
+
+
+def test_grupo_pequeno_no_usa_iqr(crudo: Any, catalogo: Catalogo) -> None:
+    filas = _apartamentos(10)
+    filas.append({"tipo_inmueble": "apartamento", "area_m2": 25.0, "precio": 100_000_000})
+
+    df = limpiar(crudo(*filas), catalogo)
+
+    assert not df["es_atipico"].any()
+
+
+def test_venta_y_arriendo_no_se_mezclan(crudo: Any, catalogo: Catalogo) -> None:
+    """Una venta normal, al lado de 40 arriendos, no es extrema: su grupo es otro."""
+    filas = [*_apartamentos(40), *_apartamentos(1, Operacion.VENTA)]
+
+    df = limpiar(crudo(*filas), catalogo)
+
+    assert not df["es_atipico"].any()
+
+
+def test_tipos_no_se_mezclan(crudo: Any, catalogo: Catalogo) -> None:
+    filas = _apartamentos(40)
+    filas.append({"tipo_inmueble": "bodega", "area_m2": 1_000.0, "precio": 2_000_000})
+
+    df = limpiar(crudo(*filas), catalogo)
+
+    assert not df["es_atipico"].any()
+
+
+def test_nulos_no_marcan(crudo: Any, catalogo: Catalogo) -> None:
+    """Review Focus 4."""
+    filas = [*_apartamentos(40), {"tipo_inmueble": "apartamento"}]
+
+    df = limpiar(crudo(*filas), catalogo)
+
+    assert not df["es_atipico"].any()
+
+
+def test_varios_motivos(crudo: Any, catalogo: Catalogo) -> None:
+    fila = _una(
+        limpiar(crudo({"tipo_inmueble": "casa", "area_m2": 5.0, "precio": 450_000_000}), catalogo)
+    )
+
+    assert fila["motivo_atipico"] == "precio_fuera_de_rango; area_fuera_de_rango"
+
+
+def test_marcar_no_borra_filas(crudo: Any, catalogo: Catalogo) -> None:
+    filas = [*_apartamentos(40), {"precio": 450_000_000}]
+
+    assert len(marcar_atipicos(limpiar(crudo(*filas), catalogo))) == 41
+
+
+def test_marcar_tabla_vacia(catalogo: Catalogo) -> None:
+    limpio = limpiar(leer_observaciones(Path("no-existe")), catalogo)
+
+    assert {"es_atipico", "motivo_atipico"} <= set(limpio.columns)
+
+
+# --------------------------------------------------------------------- Filtro de Medellín
+
+
+def test_filtrar_medellin(crudo: Any, catalogo: Catalogo) -> None:
+    df = limpiar(
+        crudo({"municipio": "MEDELLIN"}, {"municipio": "Envigado"}, {"municipio": None}),
+        catalogo,
+    )
+
+    assert filtrar_medellin(df)["id_fuente"].tolist() == ["P0"]

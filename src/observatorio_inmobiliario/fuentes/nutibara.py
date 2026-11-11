@@ -18,10 +18,9 @@ from collections.abc import Iterator
 from datetime import date
 from typing import Any, Final
 
-import httpx
 from pydantic import ValidationError
 
-from observatorio_inmobiliario.http import ClienteCortes, ErrorDeDescarga
+from observatorio_inmobiliario.http import ClienteCortes, ErrorDeDescarga, es_404
 from observatorio_inmobiliario.modelos import AnuncioNormalizado, Operacion
 from observatorio_inmobiliario.parseo import (
     parsear_area,
@@ -71,11 +70,6 @@ def cuadricula(
 
 CENTROS: Final = cuadricula(6.09, 6.38, -75.66, -75.50, 0.035)
 """Puntos desde los que se busca: cubren el Valle de Aburrá con círculos de ``RADIO_KM``."""
-
-
-def _es_404(error: ErrorDeDescarga) -> bool:
-    causa = error.__cause__
-    return isinstance(causa, httpx.HTTPStatusError) and causa.response.status_code == 404
 
 
 def _slug(texto: str) -> str:
@@ -189,7 +183,7 @@ class FuenteNutibara:
             try:
                 respuesta = self._buscar(status, latitud, longitud, pagina)
             except ErrorDeDescarga as error:
-                if _es_404(error):
+                if es_404(error):
                     return  # sin inmuebles cerca de este punto
                 raise
             datos = respuesta.get("data") or {}

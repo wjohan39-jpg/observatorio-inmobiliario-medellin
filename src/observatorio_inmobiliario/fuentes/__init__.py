@@ -5,7 +5,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any
 
-from observatorio_inmobiliario.fuentes import alnago, nutibara, santafe, uribienes
+from observatorio_inmobiliario.fuentes import alnago, nutibara, puertabierta, santafe, uribienes
 from observatorio_inmobiliario.fuentes.base import Fuente
 from observatorio_inmobiliario.http import ClienteCortes
 
@@ -25,6 +25,9 @@ REGISTRO: dict[str, RegistroFuente] = {
     nutibara.FuenteNutibara.nombre: RegistroFuente(nutibara.URL_BASE, nutibara.FuenteNutibara),
     uribienes.FuenteUribienes.nombre: RegistroFuente(uribienes.URL_BASE, uribienes.FuenteUribienes),
     alnago.FuenteAlnago.nombre: RegistroFuente(alnago.URL_BASE, alnago.FuenteAlnago),
+    puertabierta.FuentePuertabierta.nombre: RegistroFuente(
+        puertabierta.URL_BASE, puertabierta.FuentePuertabierta
+    ),
 }
 
 

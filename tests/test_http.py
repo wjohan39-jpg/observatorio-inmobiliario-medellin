@@ -9,6 +9,7 @@ from observatorio_inmobiliario.http import (
     ClienteCortes,
     ErrorDeDescarga,
     ErrorRutaBloqueadaPorRobots,
+    es_404,
 )
 
 URL_BASE = "https://inmobiliaria.example"
@@ -201,6 +202,20 @@ def test_404_no_reintenta(sitio: respx.MockRouter, cliente: ClienteCortes) -> No
     with pytest.raises(ErrorDeDescarga):
         cliente.get_json("/api/items")
     assert ruta.call_count == 1
+
+
+@pytest.mark.parametrize(("codigo", "esperado"), [(404, True), (403, False), (410, False)])
+def test_es_404(
+    sitio: respx.MockRouter, cliente: ClienteCortes, codigo: int, esperado: bool
+) -> None:
+    sitio.get("/api/items").respond(codigo)
+    with pytest.raises(ErrorDeDescarga) as error:
+        cliente.get_json("/api/items")
+    assert es_404(error.value) is esperado
+
+
+def test_es_404_falso_si_no_hubo_respuesta() -> None:
+    assert es_404(ErrorDeDescarga("timeout")) is False
 
 
 def test_json_invalido_es_error_de_descarga(

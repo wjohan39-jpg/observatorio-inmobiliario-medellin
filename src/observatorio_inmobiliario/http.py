@@ -33,6 +33,15 @@ class ErrorRutaBloqueadaPorRobots(Exception):
     """El ``robots.txt`` del sitio no permite pedir esta ruta."""
 
 
+def es_404(error: ErrorDeDescarga) -> bool:
+    """``True`` si la descarga falló porque el sitio respondió 404 (no encontrado).
+
+    Algunas API usan 404 para decir "no hay resultados" en vez de una lista vacía.
+    """
+    causa = error.__cause__
+    return isinstance(causa, httpx.HTTPStatusError) and causa.response.status_code == 404
+
+
 def _es_error_temporal(codigo: int) -> bool:
     return codigo == 429 or codigo >= 500
 

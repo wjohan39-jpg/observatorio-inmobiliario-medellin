@@ -161,13 +161,31 @@ Resume la última semana limpia y todo el histórico en `data/agregados/`. **Son
 **Reglas del análisis:**
 - **Base:** anuncios de Medellín que no son atípicos, uno por anuncio. Las filas repetidas por una fuente se cuentan una vez.
 - **Solo vivienda en los precios:** apartamento, apartaestudio, casa y los tres juntos. Mezclar un local con un apartamento no dice nada del precio de un barrio.
-- **Mínimo de publicación:** un precio se publica solo si resume 5 anuncios o más. Con menos, la mediana es casi el precio de un anuncio puntual. El barrio sigue contando en su comuna.
+- **Mínimo de publicación:** cada estadística de precio se publica solo si resume 5 anuncios o más **que tienen ese dato**. Por ejemplo, la mediana del m² exige 5 anuncios con área. Con menos, la mediana es casi el precio de un anuncio puntual. El barrio sigue contando en su comuna.
 - **Índice de precio relativo:** es el precio por m² de cada anuncio dividido por la mediana de su barrio, en la misma operación y tipo. Así una inmobiliaria no parece cara solo por trabajar en El Poblado. Un índice de 1,10 significa un 10 % por encima de su barrio.
 - **Estrato inferido:** Alnago y Puertabierta no publican estrato. Si en un barrio 5 anuncios o más declaran estrato y el más frecuente reúne el 60 % o más, ese estrato se asigna a los anuncios del barrio que no lo traen.
   - Probada con los anuncios que sí lo declaran, la regla acierta en el 76 %. Por eso el inferido va siempre en su propia columna.
 - **Reputación (pregunta 5):** los términos de Google Places no permiten guardar calificaciones. Se consultan en vivo desde el dashboard.
 
-**Evolución:** cada semana se compara con la anterior que tiene datos, así una semana sin scraping no parece un retiro masivo. La duración publicada excluye los anuncios que ya estaban en la primera semana del histórico, porque no se sabe cuándo empezaron. Con una sola semana (2026-S46), estas tablas todavía no muestran retiros ni cambios.
+**Evolución:** la rotación se mide por inmobiliaria. Cada una se compara con su propia semana anterior con datos, así un scraping que falló, o una fuente que se agregó tarde, no parece un retiro masivo ni un inventario nuevo. La duración publicada excluye los anuncios que ya estaban en la primera semana de su inmobiliaria, porque no se sabe cuándo empezaron. Con una sola semana (2026-S46), estas tablas todavía no muestran retiros ni cambios.
+
+## Hallazgos
+
+Del [notebook de análisis exploratorio](notebooks/01_analisis_exploratorio.ipynb), con los datos de la semana 2026-S46 (vivienda en Medellín):
+
+1. **El m² de vivienda en venta más caro cuesta 3,4 veces el más barato:** Villa Carlota (El Poblado) tiene una mediana de 10,4 millones por m², y Barrio Caicedo (comuna 9), 3,1 millones.
+2. **Las comunas más caras rinden menos en arriendo.** La rentabilidad bruta anual es 7,6 % en El Poblado y llega a 9,9 % en Villa Hermosa y San Javier (11,8 % en Guayabal).
+3. **Nutibara y Alnago son las de mayor cobertura** (183 y 179 barrios). Activo Urbano y Puertabierta son especialistas: el 88 % y el 78 % de sus anuncios están en El Poblado.
+4. **Frente a su propio barrio, la mayoría cobra casi lo mismo** (índice entre 0,99 y 1,03). Activo Urbano en arriendo queda un 14 % por encima, y Nutibara un 4 % por debajo (Santa Fe, un 10 % por debajo, pero con solo 5 anuncios comparables).
+5. **Nutibara y Panorama son las que más trabajan estratos 1 a 3** según el estrato que declaran (44 % y 40 %; Santa Fe llega al 76 %, pero con solo 38 anuncios). Activo Urbano casi no tiene (4 %). Alnago y Puertabierta no publican estrato: con el inferido de su barrio, Puertabierta queda en 2 %.
+6. **Hay 53 parejas de alta confianza entre inmobiliarias, con una diferencia de precio mediana de solo 2 %.** Nutibara y Villacruz publican el mismo precio exacto en dos de cada tres inmuebles que comparten, lo que encaja con inventario compartido por MLS.
+
+El notebook lee solo `data/agregados/`, así que se puede volver a correr desde un clon del repositorio:
+
+```bash
+uv sync --group analisis
+uv run --group analisis jupyter nbconvert --to notebook --execute --inplace notebooks/01_analisis_exploratorio.ipynb
+```
 
 ## Desarrollo
 

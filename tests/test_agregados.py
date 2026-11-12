@@ -5,17 +5,21 @@ import pytest
 
 from conftest import fila
 from observatorio_inmobiliario.agregados import (
+    NIVELES,
     anuncios_unicos,
     base_analisis,
     cobertura_comuna,
     cobertura_inmobiliaria,
+    compartidos_fuentes,
     con_vivienda,
     economia_inmobiliaria,
     estrato_inferido,
     estratos_inmobiliaria,
+    grupos_compartidos,
     indice_relativo,
     precios_zona,
 )
+from observatorio_inmobiliario.emparejamiento import Confianza, agrupar, emparejar
 
 SEMANA = "2026-S46"
 COLUMNAS_PRECIOS_ZONA = [
@@ -381,3 +385,142 @@ def test_tablas_inmobiliaria_vacias(limpio: Any, funcion: Any, columnas: list[st
     assert list(tabla.columns) == columnas
     assert str(tabla[columnas[4]].dtype) in {"Int64", "string"}
     assert str(tabla["fuente"].dtype) == "string"
+
+
+# ------------------------------------------------------------- Compartidos
+
+COLUMNAS_COMPARTIDOS_FUENTES = [
+    "semana",
+    "fuente_a",
+    "fuente_b",
+    "nivel",
+    "parejas",
+    "diferencia_precio_mediana_pct",
+    "pct_a_mas_barata",
+    "pct_mismo_precio",
+]
+COLUMNAS_GRUPOS_COMPARTIDOS = [
+    "semana",
+    "nivel",
+    "grupo",
+    "operacion",
+    "tipo",
+    "comuna",
+    "nombre_comuna",
+    "barrio",
+    "area_m2",
+    "estrato",
+    "habitaciones",
+    "fuente",
+    "precio",
+]
+
+
+def _parejas(*filas: tuple[str, str, str, int, int]) -> pd.DataFrame:
+    """Parejas mínimas: ``(fuente_a, fuente_b, confianza, precio_a, precio_b)``."""
+    datos = pd.DataFrame(
+        filas, columns=["fuente_a", "fuente_b", "confianza", "precio_a", "precio_b"]
+    )
+    mayor = datos[["precio_a", "precio_b"]].max(axis=1)
+    menor = datos[["precio_a", "precio_b"]].min(axis=1)
+    return datos.assign(
+        diferencia_precio_pct=((mayor / menor - 1) * 100).astype("float64"),
+        precio_a=datos["precio_a"].astype("Int64"),
+        precio_b=datos["precio_b"].astype("Int64"),
+    ).astype({"fuente_a": "string", "fuente_b": "string", "confianza": "string"})
+
+
+def test_compartidos_fuentes_niveles_acumulados() -> None:
+    tabla = compartidos_fuentes(
+        _parejas(("alnago", "santafe", "alta", 100, 100), ("alnago", "santafe", "baja", 100, 120)),
+        SEMANA,
+    )
+    assert dict(zip(tabla["nivel"], tabla["parejas"], strict=True)) == {
+        "alta": 1,
+        "media": 1,
+        "baja": 2,
+    }
+    assert list(tabla["nivel"]) == ["alta", "media", "baja"]
+    assert _una_fila(tabla, nivel="baja")["diferencia_precio_mediana_pct"] == pytest.approx(10.0)
+    assert list(tabla.columns) == COLUMNAS_COMPARTIDOS_FUENTES
+
+
+def test_pct_a_mas_barata_y_mismo_precio() -> None:
+    tabla = compartidos_fuentes(
+        _parejas(
+            ("alnago", "santafe", "alta", 1, 2),
+            ("alnago", "santafe", "alta", 2, 1),
+            ("alnago", "santafe", "alta", 3, 3),
+        ),
+        SEMANA,
+    )
+    alta = _una_fila(tabla, nivel="alta")
+    assert alta["pct_a_mas_barata"] == pytest.approx(33.3)
+    assert alta["pct_mismo_precio"] == pytest.approx(33.3)
+
+
+def _compartidos(limpio: Any) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Base y grupos reales: el mismo apartamento en tres fuentes y una pareja en otra torre."""
+    base = base_analisis(
+        limpio(
+            fila(fuente="santafe", id_fuente="S1", precio=2_000_000, area_m2=80.4),
+            fila(fuente="nutibara", id_fuente="N1", precio=2_100_000, area_m2=80.4),
+            fila(fuente="alnago", id_fuente="A1", precio=1_900_000, estrato=None),
+            fila(
+                fuente="uribienes",
+                id_fuente="U1",
+                operacion="venta",
+                codigo_barrio=None,
+                barrio_normalizado=None,
+            ),
+            fila(
+                fuente="villacruz",
+                id_fuente="V1",
+                operacion="venta",
+                codigo_barrio=None,
+                barrio_normalizado=None,
+            ),
+        )
+    )
+    return base, agrupar(emparejar(base))
+
+
+def test_grupos_compartidos_anonimos(limpio: Any) -> None:
+    base, grupos = _compartidos(limpio)
+    tabla = grupos_compartidos(grupos, base, SEMANA)
+    assert list(tabla.columns) == COLUMNAS_GRUPOS_COMPARTIDOS
+    for privada in ("id_fuente", "url", "latitud", "longitud"):
+        assert privada not in tabla.columns
+    alta = tabla[tabla["nivel"] == "alta"]
+    assert sorted(set(alta["grupo"])) == [1, 2]
+    primero = alta[alta["grupo"] == 1]
+    assert sorted(primero["fuente"]) == ["alnago", "nutibara", "santafe"]
+    assert set(primero["barrio"]) == {"Laureles"}
+    assert set(primero["area_m2"]) == {80}
+    venta = alta[alta["operacion"] == "venta"]
+    assert set(venta["barrio"]) == {"LAURELES ESTADIO"}  # sin barrio: el nombre de la comuna
+
+
+def test_grupos_compartidos_numeracion_estable(limpio: Any) -> None:
+    base, grupos = _compartidos(limpio)
+    pd.testing.assert_frame_equal(
+        grupos_compartidos(grupos, base, SEMANA),
+        grupos_compartidos(grupos.iloc[::-1], base.iloc[::-1], SEMANA),
+    )
+
+
+def test_compartidos_vacios(limpio: Any) -> None:
+    base = base_analisis(limpio())
+    parejas = emparejar(base)
+    fuentes = compartidos_fuentes(parejas, SEMANA)
+    grupos = grupos_compartidos(agrupar(parejas), base, SEMANA)
+    assert fuentes.empty and grupos.empty
+    assert list(fuentes.columns) == COLUMNAS_COMPARTIDOS_FUENTES
+    assert list(grupos.columns) == COLUMNAS_GRUPOS_COMPARTIDOS
+    assert str(fuentes["parejas"].dtype) == "Int64"
+    assert str(grupos["grupo"].dtype) == "Int64"
+    assert str(grupos["fuente"].dtype) == "string"
+
+
+def test_niveles_coinciden_con_confianza() -> None:
+    assert [c.value for c in Confianza] == list(NIVELES)

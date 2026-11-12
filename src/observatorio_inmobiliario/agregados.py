@@ -349,3 +349,133 @@ def estratos_inmobiliaria(base: pd.DataFrame, semana: str) -> pd.DataFrame:
     tabla = tabla.sort_values(["fuente", "operacion", "estrato"])
     tipos = {"estrato": "Int64", "declarados": "Int64", "inferidos": "Int64"}
     return _tipar(tabla, COLUMNAS_ESTRATOS, tipos)
+
+
+# ------------------------------------------------------------- Compartidos
+
+NIVELES: Final = ("alta", "media", "baja")
+"""Niveles de confianza de mayor a menor, los mismos de ``emparejamiento.Confianza``.
+
+Se repiten aquí porque ``emparejamiento`` importa de este módulo; una prueba verifica que
+coinciden."""
+
+COLUMNAS_COMPARTIDOS_FUENTES: Final = [
+    "semana",
+    "fuente_a",
+    "fuente_b",
+    "nivel",
+    "parejas",
+    "diferencia_precio_mediana_pct",
+    "pct_a_mas_barata",
+    "pct_mismo_precio",
+]
+COLUMNAS_GRUPOS_COMPARTIDOS: Final = [
+    "semana",
+    "nivel",
+    "grupo",
+    "operacion",
+    "tipo",
+    "comuna",
+    "nombre_comuna",
+    "barrio",
+    "area_m2",
+    "estrato",
+    "habitaciones",
+    "fuente",
+    "precio",
+]
+
+
+def _hasta(nivel: str) -> list[str]:
+    """Los niveles iguales o mayores que ``nivel``: ``"media"`` → ``["alta", "media"]``."""
+    return list(NIVELES[: NIVELES.index(nivel) + 1])
+
+
+def compartidos_fuentes(parejas: pd.DataFrame, semana: str) -> pd.DataFrame:
+    """Parejas y diferencia de precio por par de inmobiliarias y nivel (pregunta 7).
+
+    El nivel es acumulado: ``"media"`` cuenta las parejas alta y media. Los porcentajes de
+    "más barata" y "mismo precio" se calculan sobre las parejas con los dos precios.
+    """
+    partes = []
+    for nivel in NIVELES:
+        datos = parejas[parejas["confianza"].isin(_hasta(nivel))]
+        if datos.empty:
+            continue
+        precio_a = datos["precio_a"].astype("Float64")
+        precio_b = datos["precio_b"].astype("Float64")
+        con_precios = (precio_a.notna() & precio_b.notna()).astype(bool)
+        datos = datos.assign(
+            con_precios=con_precios,
+            a_mas_barata=((precio_a < precio_b).fillna(False) & con_precios).astype(bool),
+            mismo_precio=((precio_a == precio_b).fillna(False) & con_precios).astype(bool),
+        )
+        grupos = datos.groupby(["fuente_a", "fuente_b"])
+        resumen = pd.DataFrame(
+            {
+                "parejas": grupos.size(),
+                "diferencia_precio_mediana_pct": grupos["diferencia_precio_pct"].median(),
+                "pct_a_mas_barata": grupos["a_mas_barata"].sum() / grupos["con_precios"].sum(),
+                "pct_mismo_precio": grupos["mismo_precio"].sum() / grupos["con_precios"].sum(),
+            }
+        ).reset_index()
+        resumen["nivel"] = nivel
+        partes.append(resumen)
+
+    tabla = pd.concat(partes, ignore_index=True) if partes else pd.DataFrame()
+    if not tabla.empty:
+        for columna in ("pct_a_mas_barata", "pct_mismo_precio"):
+            tabla[columna] = (tabla[columna].astype("float64") * 100).round(1)
+        tabla["diferencia_precio_mediana_pct"] = (
+            tabla["diferencia_precio_mediana_pct"].astype("float64").round(1)
+        )
+        tabla["semana"] = semana
+    tipos = {
+        "parejas": "Int64",
+        "diferencia_precio_mediana_pct": "float64",
+        "pct_a_mas_barata": "float64",
+        "pct_mismo_precio": "float64",
+    }
+    return _tipar(tabla, COLUMNAS_COMPARTIDOS_FUENTES, tipos)
+
+
+def grupos_compartidos(grupos: pd.DataFrame, base: pd.DataFrame, semana: str) -> pd.DataFrame:
+    """Los grupos de inmuebles compartidos, anónimos (página de compartidos del dashboard).
+
+    Una fila por nivel, grupo y anuncio con los datos de hecho que permite el spec §7.1:
+    barrio, área, estrato y precio por fuente. **Sin id, URL ni coordenadas.** Los grupos se
+    numeran de 1 a n en cada nivel, en el orden de su id, así la numeración no depende del
+    orden de las filas.
+    """
+    datos = grupos.merge(anuncios_unicos(base), on=CLAVE, how="inner")
+    partes = []
+    for nivel in NIVELES:
+        columna = f"grupo_{nivel}"
+        del_nivel = datos[datos[columna].notna()]
+        if del_nivel.empty:
+            continue
+        partes.append(
+            del_nivel.assign(
+                nivel=nivel,
+                grupo=del_nivel[columna].rank(method="dense").astype("Int64"),
+            )
+        )
+
+    tabla = pd.concat(partes, ignore_index=True) if partes else pd.DataFrame()
+    if not tabla.empty:
+        tabla = tabla.assign(
+            semana=semana,
+            tipo=tabla["tipo_normalizado"],
+            barrio=tabla["barrio_normalizado"].fillna(tabla["nombre_comuna"]),
+            area_m2=tabla["area_m2"].astype("Float64").round().astype("Int64"),
+            orden_nivel=tabla["nivel"].map(NIVELES.index),
+        )
+        tabla = tabla.sort_values(["orden_nivel", "grupo", "fuente", "precio"], kind="stable")
+    tipos = {
+        "grupo": "Int64",
+        "area_m2": "Int64",
+        "estrato": "Int64",
+        "habitaciones": "Int64",
+        "precio": "Int64",
+    }
+    return _tipar(tabla, COLUMNAS_GRUPOS_COMPARTIDOS, tipos)

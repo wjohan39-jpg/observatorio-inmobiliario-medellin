@@ -6,6 +6,7 @@ from pathlib import Path
 from typing import Any
 
 import pytest
+import respx
 
 from observatorio_inmobiliario import cli
 from observatorio_inmobiliario.almacenamiento import (
@@ -18,6 +19,7 @@ from observatorio_inmobiliario.almacenamiento import (
 )
 from observatorio_inmobiliario.http import ErrorDeDescarga
 from observatorio_inmobiliario.modelos import AnuncioNormalizado, Operacion
+from observatorio_inmobiliario.reputacion import URL_BUSQUEDA
 
 
 class FuenteFalsa:
@@ -364,3 +366,34 @@ def test_agregados_sin_compartidos(tmp_path: Path, capsys: pytest.CaptureFixture
     error = capsys.readouterr().err
     assert "corre primero: observatorio compartidos" in error
     assert not (tmp_path / "agregados").exists()
+
+
+# ---------------------------------------------------------------------- google
+
+
+def test_google_buscar(monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]) -> None:
+    monkeypatch.setenv("GOOGLE_PLACES_API_KEY", "clave")
+    with respx.mock:
+        respx.post(URL_BUSQUEDA).respond(
+            json={
+                "places": [
+                    {
+                        "id": "ChIJ1",
+                        "displayName": {"text": "Alnago"},
+                        "formattedAddress": "Calle 10, Medellín",
+                    }
+                ]
+            }
+        )
+        assert cli.main(["google", "buscar", "Alnago Medellín"]) == 0
+
+    salida = capsys.readouterr().out
+    assert "ChIJ1" in salida and "Alnago" in salida and "Calle 10" in salida
+
+
+def test_google_buscar_sin_clave(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("GOOGLE_PLACES_API_KEY", raising=False)
+    assert cli.main(["google", "buscar", "Alnago"]) == 1
+    assert "falta GOOGLE_PLACES_API_KEY" in capsys.readouterr().err

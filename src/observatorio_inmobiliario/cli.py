@@ -8,6 +8,7 @@ Uso::
     observatorio limpiar                            # limpia la última semana descargada
     observatorio compartidos                        # empareja anuncios de la última semana limpia
     observatorio agregados                          # tablas públicas del análisis
+    observatorio google buscar "Alnago Medellín"    # busca el place_id de una sede en Google
 """
 
 import argparse
@@ -18,6 +19,7 @@ import sys
 from collections.abc import Sequence
 from pathlib import Path
 
+import httpx
 import pandas as pd
 
 from observatorio_inmobiliario import agregados
@@ -48,6 +50,7 @@ from observatorio_inmobiliario.http import (
 )
 from observatorio_inmobiliario.limpieza import limpiar
 from observatorio_inmobiliario.modelos import AnuncioNormalizado
+from observatorio_inmobiliario.reputacion import VARIABLE_CLAVE, buscar_sedes, clave_api
 
 logger = logging.getLogger(__name__)
 
@@ -193,6 +196,19 @@ def _crear_parser() -> argparse.ArgumentParser:
         default=AGREGADOS_POR_DEFECTO,
         help=f"carpeta de las tablas agregadas (por defecto: {AGREGADOS_POR_DEFECTO})",
     )
+
+    google = comandos.add_parser(
+        "google",
+        help="herramientas de Google Places (necesita GOOGLE_PLACES_API_KEY)",
+        description="Herramientas de Google Places. La clave se lee de GOOGLE_PLACES_API_KEY.",
+    )
+    acciones = google.add_subparsers(dest="accion", required=True, metavar="ACCION")
+    buscar = acciones.add_parser(
+        "buscar",
+        help="busca sedes por texto e imprime su place_id",
+        description="Busca sedes en Google e imprime id, nombre y dirección para copiarlos.",
+    )
+    buscar.add_argument("texto", help='texto de búsqueda, p. ej. "Alnago Medellín"')
     return parser
 
 
@@ -350,6 +366,26 @@ def _agregados(limpio: Path, compartidos: Path, salida: Path) -> int:
     return 0
 
 
+def _google_buscar(texto: str) -> int:
+    clave = clave_api()
+    if clave is None:
+        print(
+            f"falta {VARIABLE_CLAVE}: agrégala a .env y usa uv run --env-file .env", file=sys.stderr
+        )
+        return 1
+    try:
+        with httpx.Client() as cliente:
+            sedes = buscar_sedes(cliente, texto, clave)
+    except httpx.HTTPError as error:
+        print(f"google: la búsqueda falló ({type(error).__name__})", file=sys.stderr)
+        return 1
+    if not sedes:
+        print(f"sin resultados para {texto!r}")
+    for sede in sedes:
+        print(f"{sede['id']}  {sede['nombre']}  ({sede['direccion']})")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Ejecuta el comando y devuelve el código de salida (0 = éxito)."""
     args = _crear_parser().parse_args(argv)
@@ -365,6 +401,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _compartidos(args.semana, args.limpio, args.salida)
     if args.comando == "agregados":
         return _agregados(args.limpio, args.compartidos, args.salida)
+    if args.comando == "google":
+        return _google_buscar(args.texto)
     return _scrape(
         args.fuente,
         args.salida,

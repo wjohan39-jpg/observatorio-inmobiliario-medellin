@@ -123,14 +123,19 @@ _TIPOS_PANDAS: Final[dict[pa.DataType, Any]] = {
 """Al leer, enteros y textos usan los tipos de pandas que admiten vacíos (``<NA>``)."""
 
 
-def ruta_semana(directorio: Path, fuente: str, fecha: date) -> Path:
-    """Archivo de la semana ISO de ``fecha``, p. ej. ``directorio/santafe/2026-S46.parquet``.
+def semana_de(fecha: date) -> str:
+    """Semana ISO de ``fecha``, p. ej. ``"2026-S46"``.
 
     Se usa el año ISO y no el del calendario: el 1 de enero de 2027 pertenece a la
     semana 53 de 2026.
     """
     año, semana, _ = fecha.isocalendar()
-    return directorio / fuente / f"{año}-S{semana:02d}.parquet"
+    return f"{año}-S{semana:02d}"
+
+
+def ruta_semana(directorio: Path, fuente: str, fecha: date) -> Path:
+    """Archivo de la semana ISO de ``fecha``, p. ej. ``directorio/santafe/2026-S46.parquet``."""
+    return directorio / fuente / f"{semana_de(fecha)}.parquet"
 
 
 def guardar_observaciones(anuncios: Iterable[AnuncioNormalizado], directorio: Path) -> list[Path]:

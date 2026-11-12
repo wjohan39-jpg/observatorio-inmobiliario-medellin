@@ -32,6 +32,8 @@ from typing import Final
 import numpy as np
 import pandas as pd
 
+from observatorio_inmobiliario.agregados import anuncios_unicos
+
 
 class Confianza(StrEnum):
     """Qué tan seguro es que dos anuncios sean el mismo inmueble, de mayor a menor."""
@@ -136,7 +138,7 @@ def _anuncios(limpio: pd.DataFrame) -> pd.DataFrame:
         & limpio["tipo_normalizado"].notna()
         & (area > 0)
     )
-    return limpio[entran].drop_duplicates(CLAVE)[_BLOQUE + _POR_LADO]
+    return anuncios_unicos(limpio[entran])[_BLOQUE + _POR_LADO]
 
 
 def emparejar(limpio: pd.DataFrame) -> pd.DataFrame:

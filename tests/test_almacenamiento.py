@@ -18,6 +18,7 @@ from observatorio_inmobiliario.almacenamiento import (
     leer_observaciones,
     leer_semana,
     ruta_semana,
+    semana_de,
     semanas_disponibles,
     semanas_limpias,
 )
@@ -335,3 +336,8 @@ def test_leer_compartidos_filtra_por_semana(
 
     assert len(leer_compartidos(tmp_path)[0]) == 2
     assert len(leer_compartidos(tmp_path, "2026-S47")[0]) == 1
+
+
+def test_semana_de() -> None:
+    assert semana_de(date(2026, 11, 11)) == "2026-S46"
+    assert semana_de(date(2027, 1, 1)) == "2026-S53"

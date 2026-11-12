@@ -9,7 +9,7 @@ import pyarrow.parquet as pq
 import pytest
 
 from observatorio_inmobiliario.almacenamiento import ESQUEMA_LIMPIO, leer_limpio
-from observatorio_inmobiliario.emparejamiento import distancia_m, emparejar
+from observatorio_inmobiliario.emparejamiento import agrupar, clave_anuncio, distancia_m, emparejar
 
 PUNTO = {"latitud": 6.245, "longitud": -75.595}
 GRADO_LAT_M = 111_195.0  # metros en 1° de latitud con R = 6.371.000 m
@@ -303,3 +303,109 @@ def test_diferencia_precio_pct(limpio: Any) -> None:
     )
     assert pareja["diferencia_precio_pct"] == pytest.approx(10.0)
     assert pareja["precio_a"] == 110_000_000
+
+
+# ------------------------------------------------------------------------ Grupos
+
+COLUMNAS_GRUPOS = ["fuente", "id_fuente", "operacion", "grupo_alta", "grupo_media", "grupo_baja"]
+
+
+def _parejas(*aristas: tuple[str, str, str]) -> pd.DataFrame:
+    """Parejas mínimas para ``agrupar``: ``("fuente:id", "fuente:id", confianza)``, en arriendo."""
+    filas = []
+    for a, b, confianza in aristas:
+        (fuente_a, id_a), (fuente_b, id_b) = sorted([a.split(":"), b.split(":")])
+        filas.append(
+            {
+                "fuente_a": fuente_a,
+                "id_fuente_a": id_a,
+                "fuente_b": fuente_b,
+                "id_fuente_b": id_b,
+                "operacion": "arriendo",
+                "confianza": confianza,
+            }
+        )
+    return pd.DataFrame(filas, columns=COLUMNAS_PAREJAS).astype("string")
+
+
+def _grupos(resultado: pd.DataFrame, nivel: str) -> dict[str, str | None]:
+    return {
+        f"{f}:{i}": (None if pd.isna(g) else g)
+        for f, i, g in zip(
+            resultado["fuente"], resultado["id_fuente"], resultado[f"grupo_{nivel}"], strict=True
+        )
+    }
+
+
+def test_clave_anuncio() -> None:
+    assert clave_anuncio("nutibara", "123", "venta") == "nutibara:123:venta"
+
+
+def test_pareja_alta_forma_un_grupo_en_los_tres_niveles() -> None:
+    fila = agrupar(_parejas(("santafe:S1", "nutibara:N1", "alta")))
+    assert len(fila) == 2
+    for nivel in ("alta", "media", "baja"):
+        assert set(fila[f"grupo_{nivel}"]) == {"nutibara:N1:arriendo"}
+
+
+def test_pareja_baja_solo_en_grupo_baja() -> None:
+    resultado = agrupar(_parejas(("santafe:S1", "nutibara:N1", "baja")))
+    assert resultado["grupo_alta"].isna().all()
+    assert resultado["grupo_media"].isna().all()
+    assert set(resultado["grupo_baja"]) == {"nutibara:N1:arriendo"}
+
+
+def test_transitividad() -> None:
+    resultado = agrupar(
+        _parejas(("villacruz:V1", "santafe:S1", "alta"), ("santafe:S1", "alnago:A1", "alta"))
+    )
+    assert set(_grupos(resultado, "alta").values()) == {"alnago:A1:arriendo"}
+    assert len(resultado) == 3
+
+
+def test_cadena_debil_no_contamina() -> None:
+    resultado = agrupar(
+        _parejas(("alnago:A1", "nutibara:B1", "alta"), ("nutibara:B1", "santafe:C1", "baja"))
+    )
+    alta, baja = _grupos(resultado, "alta"), _grupos(resultado, "baja")
+    assert alta == {
+        "alnago:A1": "alnago:A1:arriendo",
+        "nutibara:B1": "alnago:A1:arriendo",
+        "santafe:C1": None,
+    }
+    assert set(baja.values()) == {"alnago:A1:arriendo"}
+
+
+def test_agrupar_vacio_devuelve_columnas(limpio: Any) -> None:
+    resultado = agrupar(emparejar(limpio()))
+    assert resultado.empty
+    assert list(resultado.columns) == COLUMNAS_GRUPOS
+
+
+def test_agrupar_orden_de_entrada() -> None:
+    parejas = _parejas(
+        ("alnago:A1", "nutibara:B1", "alta"),
+        ("nutibara:B1", "santafe:C1", "media"),
+        ("panorama:P1", "uribienes:U1", "baja"),
+    )
+    pd.testing.assert_frame_equal(
+        agrupar(parejas), agrupar(parejas.iloc[::-1].reset_index(drop=True))
+    )
+
+
+def test_emparejar_y_agrupar_extremo_a_extremo(limpio: Any) -> None:
+    resultado = agrupar(
+        emparejar(
+            limpio(
+                _fila(fuente="santafe", id_fuente="S1"),
+                _fila(fuente="nutibara", id_fuente="N1"),
+                _fila(fuente="alnago", id_fuente="A1", **_al_norte(50)),
+                _fila(fuente="santafe", id_fuente="S2", operacion="venta", habitaciones=1),
+                _fila(fuente="uribienes", id_fuente="U1", operacion="venta", habitaciones=1),
+                _fila(fuente="villacruz", id_fuente="V1", tipo_normalizado="casa"),
+            )
+        )
+    )
+    assert list(resultado.columns) == COLUMNAS_GRUPOS
+    assert set(resultado["grupo_alta"]) == {"alnago:A1:arriendo", "santafe:S2:venta"}
+    assert len(resultado) == 5  # la casa de villacruz no tiene pareja

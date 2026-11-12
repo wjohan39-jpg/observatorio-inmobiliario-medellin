@@ -25,6 +25,7 @@ Una pareja es **ambigua** si uno de sus anuncios tiene más de una pareja en la 
 si era baja, se descarta.
 """
 
+from collections.abc import Iterable
 from enum import StrEnum
 from typing import Final
 
@@ -214,3 +215,82 @@ def emparejar(limpio: pd.DataFrame) -> pd.DataFrame:
     p = p.assign(diferencia_precio_pct=diferencia.astype("float64"))
     p = p.sort_values(["fuente_a", "id_fuente_a", "fuente_b", "id_fuente_b", "operacion"])
     return p[COLUMNAS].astype(_vacio().dtypes.to_dict()).reset_index(drop=True)
+
+
+COLUMNAS_GRUPOS: Final = [
+    "fuente",
+    "id_fuente",
+    "operacion",
+    "grupo_alta",
+    "grupo_media",
+    "grupo_baja",
+]
+_PAREJA_A: Final = ["fuente_a", "id_fuente_a"]
+_PAREJA_B: Final = ["fuente_b", "id_fuente_b"]
+_ORDEN: Final = {Confianza.ALTA.value: 3, Confianza.MEDIA.value: 2, Confianza.BAJA.value: 1}
+
+
+def clave_anuncio(fuente: str, id_fuente: str, operacion: str) -> str:
+    """Texto que identifica un anuncio en una semana, p. ej. ``"nutibara:123:venta"``."""
+    return f"{fuente}:{id_fuente}:{operacion}"
+
+
+def _componentes(aristas: Iterable[tuple[str, str]]) -> dict[str, str]:
+    """Unión-búsqueda: para cada clave, el id de su grupo (la menor clave del grupo).
+
+    Cada clave apunta a un "padre"; la raíz de un grupo se apunta a sí misma. Unir dos grupos
+    es colgar una raíz de la otra (siempre la mayor de la menor, así la raíz es el id). Al
+    buscar una raíz se acortan los caminos para que las búsquedas siguientes sean directas.
+    """
+    padre: dict[str, str] = {}
+
+    def raiz(clave: str) -> str:
+        padre.setdefault(clave, clave)
+        while padre[clave] != clave:
+            padre[clave] = padre[padre[clave]]
+            clave = padre[clave]
+        return clave
+
+    for a, b in aristas:
+        ra, rb = raiz(a), raiz(b)
+        if ra != rb:
+            menor, mayor = sorted((ra, rb))
+            padre[mayor] = menor
+    return {clave: raiz(clave) for clave in padre}
+
+
+def agrupar(parejas: pd.DataFrame) -> pd.DataFrame:
+    """Los grupos de inmueble de cada anuncio emparejado, uno por nivel de confianza.
+
+    ``grupo_<nivel>`` se arma solo con las parejas de ese nivel o uno mayor (``grupo_media``
+    usa las alta y las media), para que una cadena de parejas débiles no una grupos fuertes.
+    Es nulo si el anuncio no tiene parejas de ese nivel. El id del grupo es la menor
+    :func:`clave_anuncio` de sus miembros, así no depende del orden de las parejas.
+    """
+    anuncios: dict[str, tuple[str, str, str]] = {}
+    aristas: list[tuple[str, str, int]] = []
+    columnas = [*_PAREJA_A, *_PAREJA_B, "operacion", "confianza"]
+    for fuente_a, id_a, fuente_b, id_b, operacion, confianza in (
+        parejas[columnas].astype(str).values
+    ):
+        lado_a, lado_b = (fuente_a, id_a, operacion), (fuente_b, id_b, operacion)
+        clave_a, clave_b = clave_anuncio(*lado_a), clave_anuncio(*lado_b)
+        anuncios[clave_a], anuncios[clave_b] = lado_a, lado_b
+        aristas.append((clave_a, clave_b, _ORDEN[confianza]))
+
+    claves = sorted(anuncios, key=anuncios.__getitem__)
+    grupos: dict[str, list[str | None]] = {}
+    for confianza in Confianza:
+        nivel = _ORDEN[confianza.value]
+        componentes = _componentes((a, b) for a, b, n in aristas if n >= nivel)
+        grupos[f"grupo_{confianza.value}"] = [componentes.get(clave) for clave in claves]
+
+    return pd.DataFrame(
+        {
+            "fuente": [anuncios[c][0] for c in claves],
+            "id_fuente": [anuncios[c][1] for c in claves],
+            "operacion": [anuncios[c][2] for c in claves],
+            **grupos,
+        },
+        columns=COLUMNAS_GRUPOS,
+    ).astype("string")

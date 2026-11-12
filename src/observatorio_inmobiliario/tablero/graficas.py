@@ -306,3 +306,66 @@ def evolucion(evolucion_precios: pd.DataFrame, operacion: str) -> go.Figure:
     )
     figura.update_layout(title=titulo)
     return figura
+
+
+def semanas(evolucion_precios: pd.DataFrame) -> list[str]:
+    """Las semanas con datos de precios, ordenadas."""
+    return sorted(str(s) for s in evolucion_precios["semana"].dropna().unique())
+
+
+def rotacion(rotacion_inmobiliaria: pd.DataFrame) -> go.Figure:
+    """Tasa de retiro semanal por inmobiliaria (qué tan rápido rota su inventario)."""
+    titulo = "Tasa de retiro semanal por inmobiliaria (% de anuncios que salen)"
+    filas = rotacion_inmobiliaria[rotacion_inmobiliaria["tasa_retiro_pct"].notna()]
+    filas = filas[filas["operacion"].isin(["venta", "arriendo"])]
+    if filas.empty:
+        return _sin_datos(titulo)
+    figura = px.line(
+        filas,
+        x="semana",
+        y="tasa_retiro_pct",
+        color="fuente",
+        line_dash="operacion",
+        markers=True,
+        color_discrete_map=COLORES_FUENTE,
+        labels={"tasa_retiro_pct": "Tasa de retiro (%)", "semana": "Semana"},
+        template=_PLANTILLA,
+    )
+    figura.update_layout(title=titulo)
+    return figura
+
+
+def tabla_grupos(grupos_compartidos: pd.DataFrame, nivel: str) -> pd.DataFrame:
+    """Los grupos anónimos en formato ancho: una fila por grupo, una columna de precio por fuente.
+
+    Sin ids ni URL (spec §7.1). Si una fuente tiene dos unidades gemelas en el grupo, se
+    muestra la más barata. ``Diferencia (%)`` es la del precio mayor frente al menor.
+    """
+    filas = grupos_compartidos[grupos_compartidos["nivel"] == nivel]
+    if filas.empty:
+        return pd.DataFrame()
+    precios = filas.pivot_table(
+        index="grupo", columns="fuente", values="precio", aggfunc="min"
+    ).astype("float64")
+    datos = filas.groupby("grupo").agg(
+        operacion=("operacion", "first"),
+        tipo=("tipo", "first"),
+        barrio=("barrio", "first"),
+        area=("area_m2", "median"),
+        habitaciones=("habitaciones", "first"),
+        estrato=("estrato", "max"),
+    )
+    diferencia = (precios.max(axis=1) / precios.min(axis=1) - 1) * 100
+    tabla = datos.join(precios).assign(diferencia=diferencia.round(1)).reset_index()
+    return tabla.rename(
+        columns={
+            "grupo": "Grupo",
+            "operacion": "Operación",
+            "tipo": "Tipo",
+            "barrio": "Barrio",
+            "area": "Área (m²)",
+            "habitaciones": "Habitaciones",
+            "estrato": "Estrato",
+            "diferencia": "Diferencia (%)",
+        }
+    )

@@ -147,3 +147,27 @@ def test_pesos_en_formato_colombiano(valor: float, texto: str) -> None:
 
 def test_entero_en_formato_colombiano() -> None:
     assert vista.entero(5630) == "5.630"
+
+
+def test_tabla_grupos_ancha(reales: dict[str, pd.DataFrame]) -> None:
+    grupos = reales["grupos_compartidos"]
+    tabla = graficas.tabla_grupos(grupos, "alta")
+    assert len(tabla) == grupos.loc[grupos["nivel"] == "alta", "grupo"].nunique()
+    assert {"Grupo", "Barrio", "Área (m²)", "Diferencia (%)"} <= set(tabla.columns)
+    fuentes = set(grupos.loc[grupos["nivel"] == "alta", "fuente"])
+    assert fuentes <= set(tabla.columns)
+    assert (tabla["Diferencia (%)"].dropna() >= 0).all()
+
+
+def test_tabla_grupos_vacia(vacias: dict[str, pd.DataFrame]) -> None:
+    assert graficas.tabla_grupos(vacias["grupos_compartidos"], "alta").empty
+
+
+def test_rotacion(reales: dict[str, pd.DataFrame]) -> None:
+    figura = graficas.rotacion(reales["rotacion_inmobiliaria"])
+    assert figura.layout.title.text
+
+
+def test_semanas(reales: dict[str, pd.DataFrame], vacias: dict[str, pd.DataFrame]) -> None:
+    assert graficas.semanas(reales["evolucion_precios"]) == ["2026-S46"]
+    assert graficas.semanas(vacias["evolucion_precios"]) == []

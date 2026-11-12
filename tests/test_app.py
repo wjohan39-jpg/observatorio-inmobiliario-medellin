@@ -72,3 +72,44 @@ def test_inmobiliarias_con_reputacion_falsa(monkeypatch: pytest.MonkeyPatch) -> 
     con_reputacion = [t for t in tablas if "calificacion" in t.columns]
     assert con_reputacion
     assert set(con_reputacion[0]["fuente"]) == {"alnago", "santafe"}
+
+
+# ------------------------------------------------------------------ Tarea 4
+
+PAGINAS_2 = [
+    "pages/4_Propiedades_compartidas.py",
+    "pages/5_Evolución.py",
+    "pages/6_Metodología.py",
+]
+
+
+@pytest.mark.parametrize("pagina", PAGINAS_2)
+def test_pagina_2_corre_sin_errores(pagina: str) -> None:
+    app = _correr(pagina)
+    assert app.title
+
+
+def test_compartidos_sin_columnas_privadas() -> None:
+    app = _correr("pages/4_Propiedades_compartidas.py")
+    assert app.dataframe
+    for tabla in app.dataframe:
+        columnas = {str(c).lower() for c in tabla.value.columns}
+        assert not columnas & {"id_fuente", "url", "latitud", "longitud"}
+
+
+def test_compartidos_cambia_nivel() -> None:
+    app = _correr("pages/4_Propiedades_compartidas.py")
+    app.radio(key="nivel_compartidos").set_value("baja").run()
+    assert not app.exception
+
+
+def test_evolucion_una_semana_muestra_aviso() -> None:
+    app = _correr("pages/5_Evolución.py")
+    assert any("una sola semana" in i.value for i in app.info)
+
+
+def test_metodologia_tiene_aviso_legal() -> None:
+    app = _correr("pages/6_Metodología.py")
+    texto = " ".join(m.value for m in app.markdown)
+    assert "retirar sus datos" in texto
+    assert "Google Places" in texto

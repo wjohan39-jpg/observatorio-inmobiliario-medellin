@@ -5,7 +5,7 @@ import plotly.graph_objects as go
 import pytest
 
 from observatorio_inmobiliario.almacenamiento import TABLAS_AGREGADAS
-from observatorio_inmobiliario.tablero import graficas
+from observatorio_inmobiliario.tablero import graficas, vista
 from observatorio_inmobiliario.tablero.datos import (
     RAIZ,
     cargar_agregados,
@@ -127,3 +127,23 @@ def test_graficas_con_tablas_vacias(vacias: dict[str, pd.DataFrame]) -> None:
 
 def test_colores_fijos_por_inmobiliaria(reales: dict[str, pd.DataFrame]) -> None:
     assert set(graficas.COLORES_FUENTE) >= set(reales["cobertura_inmobiliaria"]["fuente"])
+
+
+# ---------------------------------------------------------------- Formato
+
+
+@pytest.mark.parametrize(
+    ("valor", "texto"),
+    [
+        (5_079_208, "$5,08 M"),
+        (42_553, "$42.553"),
+        (999, "$999"),
+        (1_234_567_890, "$1.234,57 M"),
+    ],
+)
+def test_pesos_en_formato_colombiano(valor: float, texto: str) -> None:
+    assert vista.pesos(valor) == texto
+
+
+def test_entero_en_formato_colombiano() -> None:
+    assert vista.entero(5630) == "5.630"

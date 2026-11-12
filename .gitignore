@@ -39,3 +39,4 @@ Thumbs.db
 .gitnexus/
 .codegraph/
 graphify-out/
+.playwright-mcp/

@@ -4,6 +4,11 @@ Cada fuente tiene su carpeta y cada semana ISO su archivo::
 
     data/crudo/santafe/2026-S46.parquet
 
+La tabla limpia (ver :mod:`observatorio_inmobiliario.limpieza`) une todas las fuentes en un
+archivo por semana::
+
+    data/limpio/2026-S46.parquet
+
 Correr el scraper dos veces en la misma semana **sobrescribe** ese archivo, así que nunca
 quedan filas duplicadas. Una semana nueva crea un archivo nuevo, y así se acumula el
 histórico.
@@ -50,6 +55,26 @@ Se declaran en vez de inferirlos para que una columna que una semana venga toda 
 cambie de tipo, y para que los enteros con vacíos no se conviertan en decimales.
 """
 
+ESQUEMA_LIMPIO: Final = pa.schema(
+    [
+        *ESQUEMA,
+        ("municipio_normalizado", pa.string()),
+        ("en_valle", pa.bool_()),
+        ("es_medellin", pa.bool_()),
+        ("coordenadas_validas", pa.bool_()),
+        ("codigo_barrio", pa.string()),
+        ("barrio_normalizado", pa.string()),
+        ("comuna", pa.string()),
+        ("nombre_comuna", pa.string()),
+        ("metodo_ubicacion", pa.string()),
+        ("tipo_normalizado", pa.string()),
+        ("precio_m2", pa.float64()),
+        ("es_atipico", pa.bool_()),
+        ("motivo_atipico", pa.string()),
+    ]
+)
+"""Columnas crudas más las que agrega la limpieza, en el mismo orden que ``limpiar``."""
+
 _TIPOS_PANDAS: Final[dict[pa.DataType, Any]] = {
     pa.string(): pd.StringDtype(),
     pa.int64(): pd.Int64Dtype(),
@@ -80,14 +105,25 @@ def guardar_observaciones(anuncios: Iterable[AnuncioNormalizado], directorio: Pa
         grupos[ruta].append(fila)
 
     for ruta, filas in grupos.items():
-        ruta.parent.mkdir(parents=True, exist_ok=True)
-        # Se escribe a un temporal y luego se reemplaza: si el proceso se corta a mitad,
-        # el archivo de la semana anterior queda intacto en vez de corrupto.
-        temporal = ruta.with_suffix(".parquet.tmp")
-        pq.write_table(pa.Table.from_pylist(filas, schema=ESQUEMA), temporal)
-        os.replace(temporal, ruta)
+        _escribir(pa.Table.from_pylist(filas, schema=ESQUEMA), ruta)
 
     return sorted(grupos)
+
+
+def _leer(rutas: list[Path], esquema: pa.Schema) -> pd.DataFrame:
+    tablas = [pq.read_table(ruta, schema=esquema) for ruta in sorted(rutas)]
+    tabla = pa.concat_tables(tablas) if tablas else esquema.empty_table()
+    df: pd.DataFrame = tabla.to_pandas(types_mapper=_TIPOS_PANDAS.get)
+    return df
+
+
+def _escribir(tabla: pa.Table, ruta: Path) -> None:
+    ruta.parent.mkdir(parents=True, exist_ok=True)
+    # Se escribe a un temporal y luego se reemplaza: si el proceso se corta a mitad,
+    # el archivo anterior queda intacto en vez de corrupto.
+    temporal = ruta.with_suffix(".parquet.tmp")
+    pq.write_table(tabla, temporal)
+    os.replace(temporal, ruta)
 
 
 def leer_observaciones(directorio: Path, fuente: str | None = None) -> pd.DataFrame:
@@ -95,8 +131,29 @@ def leer_observaciones(directorio: Path, fuente: str | None = None) -> pd.DataFr
 
     Si no hay archivos, devuelve un DataFrame vacío con las columnas del modelo.
     """
-    rutas = sorted(directorio.glob(f"{fuente or '*'}/*.parquet"))
-    tablas = [pq.read_table(ruta, schema=ESQUEMA) for ruta in rutas]
-    tabla = pa.concat_tables(tablas) if tablas else ESQUEMA.empty_table()
-    df: pd.DataFrame = tabla.to_pandas(types_mapper=_TIPOS_PANDAS.get)
-    return df
+    return _leer(list(directorio.glob(f"{fuente or '*'}/*.parquet")), ESQUEMA)
+
+
+def semanas_disponibles(directorio: Path) -> list[str]:
+    """Semanas con datos crudos de al menos una fuente, p. ej. ``["2026-S45", "2026-S46"]``."""
+    return sorted({ruta.stem for ruta in directorio.glob("*/*.parquet")})
+
+
+def leer_semana(directorio: Path, semana: str) -> pd.DataFrame:
+    """Las observaciones crudas de todas las fuentes en ``semana`` (``"2026-S46"``)."""
+    return _leer(list(directorio.glob(f"*/{semana}.parquet")), ESQUEMA)
+
+
+def guardar_limpio(df: pd.DataFrame, directorio: Path, semana: str) -> Path:
+    """Sobrescribe ``directorio/<semana>.parquet`` con la tabla limpia y devuelve la ruta."""
+    ruta = directorio / f"{semana}.parquet"
+    tabla = pa.Table.from_pandas(
+        df[ESQUEMA_LIMPIO.names], schema=ESQUEMA_LIMPIO, preserve_index=False
+    )
+    _escribir(tabla, ruta)
+    return ruta
+
+
+def leer_limpio(directorio: Path, semana: str | None = None) -> pd.DataFrame:
+    """Une las tablas limpias de ``directorio`` (o solo la de ``semana``)."""
+    return _leer(list(directorio.glob(f"{semana or '*'}.parquet")), ESQUEMA_LIMPIO)

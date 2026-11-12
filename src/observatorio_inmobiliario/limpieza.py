@@ -10,7 +10,9 @@ Cómo se ubica cada anuncio, en orden:
 2. Si la fuente no dio municipio pero el barrio es el nombre de un municipio del valle
    ("SABANETA"), ese es el municipio.
 3. Si el anuncio es de Medellín (o no tiene municipio) y sus coordenadas son válidas, se
-   busca el polígono oficial que las contiene.
+   busca el polígono oficial que las contiene. No son válidas si caen fuera del valle o si
+   son un **punto genérico**: el que pone un sitio cuando no sabe la dirección (ver
+   :func:`puntos_genericos`).
 4. Si no se ubicó así, se busca por el nombre del barrio en el catálogo.
 
 Un anuncio de otro municipio nunca recibe un barrio de Medellín, aunque su punto caiga
@@ -28,6 +30,7 @@ from observatorio_inmobiliario.modelos import Operacion
 from observatorio_inmobiliario.normalizacion import (
     MUNICIPIOS_VALLE,
     normalizar_municipio,
+    normalizar_texto,
     normalizar_tipo,
 )
 
@@ -35,6 +38,13 @@ MEDELLIN: Final = "Medellín"
 VALLE_LAT: Final = (6.00, 6.50)
 VALLE_LON: Final = (-75.72, -75.30)
 """Rectángulo que contiene el Valle de Aburrá; una coordenada fuera de él es un error."""
+
+PUNTO_GENERICO_MIN_ANUNCIOS: Final = 5
+PUNTO_GENERICO_MIN_BARRIOS: Final = 5
+"""Un punto con al menos 5 anuncios que nombran al menos 5 barrios distintos es genérico.
+
+En la semana del 2026-11-11, 58 anuncios de una fuente estaban en el mismo punto del centro
+con 48 barrios distintos. Un edificio también repite su punto, pero con un solo barrio."""
 
 RANGOS_PRECIO: Final = {
     Operacion.ARRIENDO: (200_000, 200_000_000),
@@ -66,8 +76,25 @@ def _texto(valor: object) -> str | None:
     return valor if isinstance(valor, str) else None  # las columnas de texto traen str o <NA>
 
 
+def puntos_genericos(crudo: pd.DataFrame) -> set[tuple[float, float]]:
+    """Coordenadas que los sitios usan por defecto, no la ubicación real del inmueble."""
+    con_punto = crudo[crudo["latitud"].notna() & crudo["longitud"].notna()]
+    barrios = pd.Series(
+        [normalizar_texto(b) if isinstance(b, str) else "" for b in con_punto["barrio"]],
+        index=con_punto.index,
+    ).replace("", None)
+    por_punto = barrios.groupby([con_punto["latitud"], con_punto["longitud"]])
+    resumen = pd.DataFrame({"anuncios": por_punto.size(), "barrios": por_punto.nunique()})
+    genericos = resumen[
+        (resumen["anuncios"] >= PUNTO_GENERICO_MIN_ANUNCIOS)
+        & (resumen["barrios"] >= PUNTO_GENERICO_MIN_BARRIOS)
+    ]
+    return {(float(lat), float(lon)) for lat, lon in genericos.index}
+
+
 def limpiar(crudo: pd.DataFrame, catalogo: Catalogo) -> pd.DataFrame:
     """Copia de ``crudo`` con las columnas de ubicación, tipo y precio por m²."""
+    genericos = puntos_genericos(crudo)
     municipios: list[str | None] = []
     validas: list[bool] = []
     ubicaciones: list[Ubicacion | None] = []
@@ -79,6 +106,8 @@ def limpiar(crudo: pd.DataFrame, catalogo: Catalogo) -> pd.DataFrame:
             municipio = normalizar_municipio(barrio)
 
         punto = _punto_del_valle(fila.latitud, fila.longitud)
+        if punto in genericos:
+            punto = None
         ubicacion: Ubicacion | None = None
         if municipio in (None, MEDELLIN):
             if punto is not None:
@@ -116,7 +145,8 @@ def limpiar(crudo: pd.DataFrame, catalogo: Catalogo) -> pd.DataFrame:
         dtype="string",
     )
     area = crudo["area_m2"].astype("Float64")
-    limpio["precio_m2"] = (crudo["precio"].astype("Float64") / area).where(area > 0)
+    # Mismo tipo que area_m2 (float64, con NaN si falta), para que el Parquet lo conserve.
+    limpio["precio_m2"] = (crudo["precio"].astype("Float64") / area).where(area > 0).astype(float)
     return marcar_atipicos(limpio)
 
 

@@ -337,3 +337,31 @@ def test_filtrar_medellin(crudo: Any, catalogo: Catalogo) -> None:
     )
 
     assert filtrar_medellin(df)["id_fuente"].tolist() == ["P0"]
+
+
+# --------------------------------------------------------------------- Puntos genéricos
+
+
+def test_punto_generico_no_cuenta(crudo: Any, catalogo: Catalogo) -> None:
+    """Un sitio que no sabe la dirección pone un punto por defecto: muchos barrios distintos."""
+    barrios = ["Naranjal", "Robledo", "Belén", "Boston", "Prado"]
+    df = limpiar(crudo(*({"barrio": b, **EN_LAURELES} for b in barrios)), catalogo)
+
+    assert not df["coordenadas_validas"].any()
+    primera = df.iloc[0]
+    assert (primera["codigo_barrio"], primera["metodo_ubicacion"]) == ("1103", "nombre")
+
+
+def test_edificio_con_varios_anuncios_si_cuenta(crudo: Any, catalogo: Catalogo) -> None:
+    """Varios apartamentos del mismo edificio comparten punto y barrio."""
+    df = limpiar(crudo(*({"barrio": "Naranjal", **EN_LAURELES} for _ in range(8))), catalogo)
+
+    assert df["coordenadas_validas"].all()
+    assert (df["codigo_barrio"] == "1101").all()
+
+
+def test_pocos_barrios_en_un_punto_si_cuenta(crudo: Any, catalogo: Catalogo) -> None:
+    barrios = ["Naranjal", "Naranjal", "Laureles", "Laureles", "Robledo", "Robledo"]
+    df = limpiar(crudo(*({"barrio": b, **EN_LAURELES} for b in barrios)), catalogo)
+
+    assert df["coordenadas_validas"].all()

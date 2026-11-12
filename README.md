@@ -58,6 +58,40 @@ Fuentes disponibles (corridas del 2026-11-11):
 
 Todas cubren el Valle de Aburrá. Los tiempos dependen del límite de velocidad, que es deliberadamente conservador.
 
+## Limpieza
+
+```bash
+uv run observatorio limpiar                    # limpia la última semana descargada
+uv run observatorio limpiar --semana 2026-S46  # una semana en particular
+uv run observatorio catalogo                   # actualiza el catálogo oficial de barrios
+```
+
+Une todas las fuentes de la semana en `data/limpio/<año>-S<semana>.parquet`. **No borra ningún anuncio ni cambia los datos crudos**: agrega columnas y marca lo dudoso, para que el análisis decida qué hacer con ello.
+
+| Columnas | Qué agregan |
+|---|---|
+| `municipio_normalizado`, `en_valle`, `es_medellin` | Municipio con un solo nombre ("MEDELLIN" → "Medellín"); los corregimientos cuentan como Medellín |
+| `codigo_barrio`, `barrio_normalizado`, `comuna`, `nombre_comuna`, `metodo_ubicacion` | Barrio y comuna **oficiales** de Medellín, y cómo se obtuvieron |
+| `coordenadas_validas` | Falso si el punto cae fuera del valle o es un punto genérico (ver abajo) |
+| `tipo_normalizado` | Uno de 12 tipos (apartamento, casa, local, oficina…) en lugar de las 30 variantes de los sitios |
+| `precio_m2` | Precio por m², si hay precio y área |
+| `es_atipico`, `motivo_atipico` | Precio imposible para la operación, área imposible para una vivienda, o precio por m² extremo frente a su grupo (operación y tipo) |
+
+**Cómo se ubica cada anuncio.** El catálogo es el *límite barrio-vereda catastral* de la Alcaldía de Medellín: 349 barrios y veredas, con su comuna. Se tomó de su servidor de mapas el 2026-11-11 y está en `datos_referencia/`.
+
+1. **Por coordenadas**, si las hay: el barrio cuyo polígono contiene el punto. Es lo más confiable.
+2. **Por el nombre** que publica la inmobiliaria, si no hay coordenadas. Los nombres de zona ("Poblado", "Laureles", "Belén Parque") abarcan varios barrios oficiales, así que se ubican **solo hasta la comuna** (`datos_referencia/alias_barrios.csv`).
+
+Un anuncio de otro municipio nunca recibe un barrio de Medellín, aunque su punto caiga dentro de la ciudad.
+
+**Puntos genéricos.** Algunos sitios ponen un punto por defecto cuando no saben la dirección. En una semana hubo 58 anuncios en el mismo punto del centro, con 48 barrios distintos. Por eso un punto con 5 o más anuncios que nombran 5 o más barrios distintos no se usa para ubicar. Un edificio también repite su punto, pero con un solo barrio, y ese sí se usa.
+
+Resultado de la semana 2026-S46: 8.589 anuncios; 5.700 de Medellín; el 96,5 % con comuna y el 75,9 % con barrio oficial; 1,3 % marcados como atípicos.
+
+**Limitaciones:**
+- Cuando un anuncio tiene coordenadas y nombre, los dos dan comunas distintas en el 14,5 % de los casos. Casi siempre son zonas en el borde entre dos comunas. Se usan las coordenadas.
+- Maxibienes, Panorama y Activo Urbano no publican coordenadas, así que su barrio depende del nombre. Activo Urbano casi siempre da solo la zona.
+
 ## Desarrollo
 
 Requiere [uv](https://docs.astral.sh/uv/).

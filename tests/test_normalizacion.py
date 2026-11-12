@@ -103,3 +103,12 @@ def test_normalizar_tipo(crudo: str | None, esperado: str) -> None:
 
 def test_tipos_son_doce() -> None:
     assert len(TIPOS) == len(set(TIPOS)) == 12
+
+
+@pytest.mark.parametrize(
+    "corregimiento",
+    ["Santa Elena", "SAN ANTONIO DE PRADO", "San Cristóbal", "Altavista", "Palmitas"],
+)
+def test_corregimientos_son_medellin(corregimiento: str) -> None:
+    """Los corregimientos son parte del municipio de Medellín."""
+    assert normalizar_municipio(corregimiento) == "Medellín"

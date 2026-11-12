@@ -234,3 +234,35 @@ def test_descargar_catalogo_que_no_es_geojson(servidor: respx.MockRouter) -> Non
         pytest.raises(ValueError, match="GeoJSON"),
     ):
         descargar_catalogo(cliente)
+
+
+@pytest.mark.parametrize(
+    ("texto", "comuna"),
+    [("Belén Parque", "16"), ("BELEN LA NUBIA", "16"), ("Laureles 2do Parque", "11")],
+)
+def test_sector_con_nombre_de_comuna_da_la_comuna(
+    catalogo_real: Catalogo, texto: str, comuna: str
+) -> None:
+    """Sectores que no son barrios oficiales, pero empiezan con el nombre de su comuna."""
+    ubicacion = catalogo_real.por_nombre(texto)
+
+    assert ubicacion is not None
+    assert (ubicacion.comuna, ubicacion.codigo_barrio, ubicacion.metodo) == (comuna, None, "alias")
+
+
+@pytest.mark.parametrize(
+    ("texto", "comuna", "codigo"),
+    [
+        ("Avenida Nutibara", "11", None),
+        ("Vía Las Palmas", "14", None),
+        ("Malibú", "16", None),
+        ("Vereda El Manzanillo", "70", "7089"),
+    ],
+)
+def test_alias_agregados_tras_la_corrida_real(
+    catalogo_real: Catalogo, texto: str, comuna: str, codigo: str | None
+) -> None:
+    ubicacion = catalogo_real.por_nombre(texto)
+
+    assert ubicacion is not None
+    assert (ubicacion.comuna, ubicacion.codigo_barrio) == (comuna, codigo)

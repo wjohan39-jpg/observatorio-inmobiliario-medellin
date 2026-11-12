@@ -75,11 +75,22 @@ def normalizar_texto(texto: str) -> str:
     return _NO_ALFANUMERICO.sub(" ", minusculas).strip()
 
 
-_MUNICIPIOS_POR_CLAVE: Final = {normalizar_texto(m): m for m in MUNICIPIOS_VALLE}
+CORREGIMIENTOS_MEDELLIN: Final = frozenset(
+    {"Santa Elena", "San Antonio de Prado", "San Cristóbal", "Altavista", "Palmitas"}
+)
+"""Zona rural de Medellín. Algunas fuentes los ponen como si fueran municipios."""
+
+_MUNICIPIOS_POR_CLAVE: Final = {
+    **{normalizar_texto(c): "Medellín" for c in CORREGIMIENTOS_MEDELLIN},
+    **{normalizar_texto(m): m for m in MUNICIPIOS_VALLE},
+}
 
 
 def normalizar_municipio(texto: str | None) -> str | None:
-    """Nombre oficial si es del valle; si no, el texto con mayúsculas normales."""
+    """Nombre oficial si es del valle; si no, el texto con mayúsculas normales.
+
+    Un corregimiento de Medellín ("Santa Elena") devuelve "Medellín".
+    """
     if texto is None or not texto.strip():
         return None
     return _MUNICIPIOS_POR_CLAVE.get(normalizar_texto(texto), texto.strip().title())

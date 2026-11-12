@@ -7,10 +7,17 @@ import pytest
 
 from observatorio_inmobiliario.almacenamiento import (
     ESQUEMA,
+    ESQUEMA_LIMPIO,
+    guardar_limpio,
     guardar_observaciones,
+    leer_limpio,
     leer_observaciones,
+    leer_semana,
     ruta_semana,
+    semanas_disponibles,
 )
+from observatorio_inmobiliario.catalogo import Catalogo
+from observatorio_inmobiliario.limpieza import limpiar
 from observatorio_inmobiliario.modelos import AnuncioNormalizado, Operacion
 
 SEMANA_46 = date(2026, 11, 10)
@@ -146,3 +153,84 @@ def test_leer_directorio_vacio(tmp_path: Path) -> None:
 
     assert df.empty
     assert list(df.columns) == list(AnuncioNormalizado.model_fields)
+
+
+# --------------------------------------------------------------------- Semanas y tabla limpia
+
+
+@pytest.fixture
+def catalogo(tmp_path: Path) -> Catalogo:
+    alias = tmp_path / "alias.csv"
+    alias.write_text("alias,codigo\n", encoding="utf-8")
+    return Catalogo.cargar(Path(__file__).parent / "fixtures" / "catalogo" / "mini.geojson", alias)
+
+
+def test_semanas_disponibles(tmp_path: Path) -> None:
+    guardar_observaciones(
+        [
+            _anuncio("A1"),
+            _anuncio("A2", SEMANA_47),
+            _anuncio("A3", fuente="nutibara"),
+        ],
+        tmp_path,
+    )
+
+    assert semanas_disponibles(tmp_path) == ["2026-S46", "2026-S47"]
+
+
+def test_semanas_disponibles_sin_datos(tmp_path: Path) -> None:
+    assert semanas_disponibles(tmp_path / "no-existe") == []
+
+
+def test_leer_semana_une_las_fuentes(tmp_path: Path) -> None:
+    guardar_observaciones(
+        [_anuncio("A1"), _anuncio("N1", fuente="nutibara"), _anuncio("A2", SEMANA_47)], tmp_path
+    )
+
+    df = leer_semana(tmp_path, "2026-S46")
+
+    assert sorted(df["id_fuente"]) == ["A1", "N1"]
+
+
+def test_esquema_limpio_coincide_con_limpiar(
+    tmp_path: Path, anuncios: list[AnuncioNormalizado], catalogo: Catalogo
+) -> None:
+    guardar_observaciones(anuncios, tmp_path)
+
+    limpio = limpiar(leer_observaciones(tmp_path), catalogo)
+
+    assert ESQUEMA_LIMPIO.names == list(limpio.columns)
+    assert ESQUEMA_LIMPIO.names[: len(ESQUEMA.names)] == ESQUEMA.names
+
+
+def test_guardar_y_leer_limpio(
+    tmp_path: Path, anuncios: list[AnuncioNormalizado], catalogo: Catalogo
+) -> None:
+    guardar_observaciones(anuncios, tmp_path / "crudo")
+    limpio = limpiar(leer_observaciones(tmp_path / "crudo"), catalogo)
+
+    ruta = guardar_limpio(limpio, tmp_path / "limpio", "2026-S46")
+    leido = leer_limpio(tmp_path / "limpio")
+
+    assert ruta == tmp_path / "limpio" / "2026-S46.parquet"
+    pd.testing.assert_frame_equal(leido, limpio)
+
+
+def test_guardar_limpio_sobrescribe(
+    tmp_path: Path, anuncios: list[AnuncioNormalizado], catalogo: Catalogo
+) -> None:
+    guardar_observaciones(anuncios, tmp_path / "crudo")
+    limpio = limpiar(leer_observaciones(tmp_path / "crudo"), catalogo)
+
+    guardar_limpio(limpio, tmp_path / "limpio", "2026-S46")
+    guardar_limpio(limpio.head(1), tmp_path / "limpio", "2026-S46")
+
+    assert len(leer_limpio(tmp_path / "limpio", "2026-S46")) == 1
+    assert list((tmp_path / "limpio").iterdir()) == [tmp_path / "limpio" / "2026-S46.parquet"]
+
+
+def test_leer_limpio_sin_datos(tmp_path: Path) -> None:
+    df = leer_limpio(tmp_path)
+
+    assert df.empty
+    assert list(df.columns) == ESQUEMA_LIMPIO.names

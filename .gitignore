@@ -1,5 +1,6 @@
 # --- Datos del proyecto: NUNCA al repo público -------------------------
 data/crudo/
+data/limpio/
 
 # --- Secretos -----------------------------------------------------------
 .env

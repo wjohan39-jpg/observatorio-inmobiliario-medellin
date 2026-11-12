@@ -176,7 +176,9 @@ class Catalogo:
         barrio = self._unico(clave) or self._unico(_PREFIJO.sub("", clave))
         if barrio is None:
             barrio = self._con_prefijo_de_comuna(clave)
-        return None if barrio is None else barrio.ubicacion("nombre")
+        if barrio is not None:
+            return barrio.ubicacion("nombre")
+        return self._comuna_del_prefijo(clave)
 
     def _unico(self, clave: str, comuna: str | None = None) -> _Barrio | None:
         """El barrio con ese nombre; si hay varios, el único urbano. Si no, ``None``."""
@@ -186,6 +188,13 @@ class Catalogo:
         if len(candidatos) > 1:
             candidatos = [b for b in candidatos if b.urbano]
         return candidatos[0] if len(candidatos) == 1 else None
+
+    def _comuna_del_prefijo(self, clave: str) -> Ubicacion | None:
+        """Un sector que empieza con el nombre de una comuna ("belen parque") da solo esa comuna."""
+        for nombre, comuna in self._comunas_por_nombre.items():
+            if clave.startswith(nombre + " "):
+                return Ubicacion(None, None, comuna, self._comunas[comuna], "alias")
+        return None
 
     def _con_prefijo_de_comuna(self, clave: str) -> _Barrio | None:
         """Busca "belen san bernardo" como San Bernardo, solo dentro de la comuna Belén."""

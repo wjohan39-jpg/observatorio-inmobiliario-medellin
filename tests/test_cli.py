@@ -8,6 +8,7 @@ from typing import Any
 import pytest
 
 from observatorio_inmobiliario import cli
+from observatorio_inmobiliario.almacenamiento import guardar_observaciones, leer_limpio
 from observatorio_inmobiliario.http import ErrorDeDescarga
 from observatorio_inmobiliario.modelos import AnuncioNormalizado, Operacion
 
@@ -145,3 +146,84 @@ def test_catalogo_incompleto_no_guarda(monkeypatch: pytest.MonkeyPatch, tmp_path
 
     assert cli.main(["catalogo", "--salida", str(salida)]) == 1
     assert not salida.exists()
+
+
+# --------------------------------------------------------------------- limpiar
+
+
+def _crudo(directorio: Path, fecha: date = date(2026, 11, 11)) -> None:
+    guardar_observaciones(
+        [
+            AnuncioNormalizado(
+                fuente="santafe",
+                id_fuente="A1",
+                fecha_observacion=fecha,
+                operacion=Operacion.ARRIENDO,
+                precio=2_000_000,
+                area_m2=50.0,
+                municipio="MEDELLIN",
+                latitud=6.2087,  # parque Lleras
+                longitud=-75.5676,
+            ),
+            AnuncioNormalizado(
+                fuente="nutibara",
+                id_fuente="N1",
+                fecha_observacion=fecha,
+                operacion=Operacion.VENTA,
+                precio=450_000_000,
+                municipio="Envigado",
+            ),
+        ],
+        directorio,
+    )
+
+
+def test_limpiar_guarda_y_resume(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _crudo(tmp_path / "crudo")
+    _crudo(tmp_path / "crudo", date(2026, 11, 3))  # semana anterior
+
+    codigo = cli.main(
+        ["limpiar", "--crudo", str(tmp_path / "crudo"), "--salida", str(tmp_path / "limpio")]
+    )
+
+    assert codigo == 0
+    limpio = leer_limpio(tmp_path / "limpio")
+    assert list((tmp_path / "limpio").iterdir()) == [tmp_path / "limpio" / "2026-S46.parquet"]
+    por_id = limpio.set_index("id_fuente")
+    assert por_id.loc["A1", "comuna"] == "14"  # ubicado por coordenadas con el catálogo real
+    assert por_id.loc["N1", "municipio_normalizado"] == "Envigado"
+    salida = capsys.readouterr().out
+    assert "2026-S46" in salida
+    assert "santafe" in salida and "nutibara" in salida
+
+
+def test_limpiar_una_semana(tmp_path: Path) -> None:
+    _crudo(tmp_path / "crudo")
+    _crudo(tmp_path / "crudo", date(2026, 11, 3))
+
+    args = ["--crudo", str(tmp_path / "crudo"), "--salida", str(tmp_path / "limpio")]
+    assert cli.main(["limpiar", "--semana", "2026-S45", *args]) == 0
+
+    assert list((tmp_path / "limpio").iterdir()) == [tmp_path / "limpio" / "2026-S45.parquet"]
+
+
+def test_limpiar_sin_datos(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert cli.main(["limpiar", "--crudo", str(tmp_path / "vacio")]) == 1
+
+    assert "no hay datos crudos" in capsys.readouterr().err
+
+
+def test_limpiar_semana_inexistente(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _crudo(tmp_path / "crudo")
+
+    codigo = cli.main(["limpiar", "--semana", "2025-S01", "--crudo", str(tmp_path / "crudo")])
+
+    assert codigo == 1
+    assert "no hay datos de la semana 2025-S01" in capsys.readouterr().err
+
+
+def test_limpiar_semana_mal_escrita(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        cli.main(["limpiar", "--semana", "46"])
+
+    assert "AAAA-SNN" in capsys.readouterr().err

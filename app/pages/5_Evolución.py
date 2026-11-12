@@ -1,5 +1,6 @@
 """Página 5: evolución en el tiempo (pregunta 8)."""
 
+import _ruta  # noqa: F401  (agrega src/ al path si el paquete no está instalado)
 import streamlit as st
 
 from observatorio_inmobiliario.tablero import graficas, vista

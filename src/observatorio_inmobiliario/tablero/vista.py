@@ -5,6 +5,7 @@ Están en el paquete, y no junto a las páginas, para que se importen igual desd
 """
 
 import os
+from pathlib import Path
 from typing import Any, Final
 
 import httpx
@@ -12,7 +13,7 @@ import pandas as pd
 import streamlit as st
 
 from observatorio_inmobiliario import reputacion
-from observatorio_inmobiliario.tablero.datos import cargar_agregados, cargar_geojson
+from observatorio_inmobiliario.tablero.datos import AGREGADOS, cargar_agregados, cargar_geojson
 
 CACHE_GOOGLE_S: Final = 24 * 60 * 60
 """La reputación se guarda en memoria 24 horas; nunca en disco (spec §7.2).
@@ -41,10 +42,25 @@ def configurar(titulo: str) -> None:
     st.set_page_config(page_title=f"{titulo} · Observatorio inmobiliario", layout="wide")
 
 
+def _firma(directorio: Path) -> tuple[tuple[str, float], ...]:
+    """Nombre y fecha de modificación de cada tabla: cambia cuando llegan datos nuevos."""
+    return tuple(sorted((r.name, r.stat().st_mtime) for r in directorio.glob("*.parquet")))
+
+
 @st.cache_data(show_spinner=False)
-def tablas() -> dict[str, pd.DataFrame]:
-    """Las 9 tablas agregadas, leídas una vez por sesión del servidor."""
-    return cargar_agregados()
+def _tablas(directorio: Path, firma: tuple[tuple[str, float], ...]) -> dict[str, pd.DataFrame]:
+    del firma  # solo sirve de clave de la caché
+    return cargar_agregados(directorio)
+
+
+def tablas(directorio: Path | None = None) -> dict[str, pd.DataFrame]:
+    """Las 9 tablas agregadas, con caché.
+
+    La caché se invalida cuando cambia algún archivo de ``data/agregados/``: con la
+    actualización semanal, el dashboard muestra la semana nueva sin reiniciar el servidor.
+    """
+    directorio = directorio or AGREGADOS
+    return _tablas(directorio, _firma(directorio))
 
 
 @st.cache_data(show_spinner=False)

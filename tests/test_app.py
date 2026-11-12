@@ -113,3 +113,32 @@ def test_metodologia_tiene_aviso_legal() -> None:
     texto = " ".join(m.value for m in app.markdown)
     assert "retirar sus datos" in texto
     assert "Google Places" in texto
+
+
+# ------------------------------------------------- Revisión final del plan 7
+
+
+def _con_tablas(monkeypatch: pytest.MonkeyPatch, **cambios: pd.DataFrame) -> None:
+    """Las páginas reciben las tablas reales con algunas reemplazadas."""
+    from observatorio_inmobiliario.tablero import datos, vista
+
+    reales = datos.cargar_agregados()
+    monkeypatch.setattr(vista, "cargar_agregados", lambda directorio=None: {**reales, **cambios})
+
+
+def test_inicio_mediana_nula_en_la_ultima_semana(monkeypatch: pytest.MonkeyPatch) -> None:
+    from observatorio_inmobiliario.tablero import datos
+
+    evolucion = datos.cargar_agregados()["evolucion_precios"]
+    nueva = evolucion.assign(semana="2026-S47", precio_m2_mediana=pd.NA)
+    _con_tablas(monkeypatch, evolucion_precios=pd.concat([evolucion, nueva], ignore_index=True))
+    app = _correr("Inicio.py")
+    assert all(m.value for m in app.metric)
+
+
+def test_inmobiliarias_sin_barrios(monkeypatch: pytest.MonkeyPatch) -> None:
+    from observatorio_inmobiliario.tablero import datos
+
+    cobertura = datos.cargar_agregados()["cobertura_inmobiliaria"].assign(barrios=0)
+    _con_tablas(monkeypatch, cobertura_inmobiliaria=cobertura)
+    _correr("pages/3_Inmobiliarias.py")

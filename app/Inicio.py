@@ -1,5 +1,6 @@
 """Página 1: resumen del mercado inmobiliario de Medellín."""
 
+import _ruta  # noqa: F401  (agrega src/ al path si el paquete no está instalado)
 import streamlit as st
 
 from observatorio_inmobiliario.tablero import graficas, vista
@@ -21,7 +22,8 @@ evolucion = t["evolucion_precios"]
 
 def _mediana_ciudad(operacion: str) -> str:
     filas = evolucion[(evolucion["operacion"] == operacion) & (evolucion["tipo"] == "vivienda")]
-    if filas.empty or filas["precio_m2_mediana"].isna().all():
+    filas = filas.dropna(subset=["precio_m2_mediana"])
+    if filas.empty:
         return "—"
     valor = float(filas.sort_values("semana")["precio_m2_mediana"].iloc[-1])
     return vista.pesos(valor)

@@ -177,3 +177,37 @@ def test_cache_google_dentro_del_nivel_gratuito() -> None:
     # 1.000 consultas gratis al mes en Place Details Enterprise; margen para 20 sedes.
     consultas_al_mes = 20 * 30 * (24 * 60 * 60 / vista.CACHE_GOOGLE_S)
     assert consultas_al_mes <= 1_000
+
+
+# ------------------------------------------------- Revisión final del plan 7
+
+
+def test_tablas_se_recargan_si_cambian_los_archivos(tmp_path: Path) -> None:
+    from observatorio_inmobiliario.almacenamiento import guardar_agregado
+
+    vista.tablas.clear() if hasattr(vista.tablas, "clear") else None
+    base = cargar_agregados()["cobertura_inmobiliaria"]
+    guardar_agregado(base.head(3), tmp_path, "cobertura_inmobiliaria")
+    assert len(vista.tablas(tmp_path)["cobertura_inmobiliaria"]) == 3
+
+    ruta = guardar_agregado(base.head(5), tmp_path, "cobertura_inmobiliaria")
+    import os
+
+    os.utime(ruta, (ruta.stat().st_atime, ruta.stat().st_mtime + 10))
+    assert len(vista.tablas(tmp_path)["cobertura_inmobiliaria"]) == 5
+
+
+def test_evolucion_eje_y_en_espanol(reales: dict[str, pd.DataFrame]) -> None:
+    figura = graficas.evolucion(reales["evolucion_precios"], "venta")
+    assert figura.layout.yaxis.title.text == "COP por m²"
+
+
+def test_ruta_agrega_src() -> None:
+    import importlib.util
+    import sys
+
+    spec = importlib.util.spec_from_file_location("_ruta", RAIZ / "app" / "_ruta.py")
+    assert spec and spec.loader
+    modulo = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(modulo)
+    assert str(RAIZ / "src") in sys.path

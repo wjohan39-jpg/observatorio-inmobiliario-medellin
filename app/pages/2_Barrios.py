@@ -1,5 +1,6 @@
 """Página 2: barrios y comunas (pregunta 1)."""
 
+import _ruta  # noqa: F401  (agrega src/ al path si el paquete no está instalado)
 import streamlit as st
 
 from observatorio_inmobiliario.tablero import graficas, vista

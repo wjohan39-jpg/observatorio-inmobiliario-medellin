@@ -295,13 +295,14 @@ def evolucion(evolucion_precios: pd.DataFrame, operacion: str) -> go.Figure:
     ]
     if filas.empty:
         return _sin_datos(titulo)
+    filas = filas.assign(precio_m2_mediana=filas["precio_m2_mediana"].astype("float64"))
     figura = px.line(
         filas,
         x="semana",
-        y=filas["precio_m2_mediana"].astype("float64"),
+        y="precio_m2_mediana",
         color="tipo",
         markers=True,
-        labels={"y": "COP por m²", "semana": "Semana", "tipo": "Tipo"},
+        labels={"precio_m2_mediana": "COP por m²", "semana": "Semana", "tipo": "Tipo"},
         template=_PLANTILLA,
     )
     figura.update_layout(title=titulo)

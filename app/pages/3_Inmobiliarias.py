@@ -1,5 +1,6 @@
 """Página 3: inmobiliarias (preguntas 2 a 6)."""
 
+import _ruta  # noqa: F401  (agrega src/ al path si el paquete no está instalado)
 import streamlit as st
 
 from observatorio_inmobiliario.reputacion import reconocimiento
@@ -24,12 +25,14 @@ with cobertura:
         vista.sin_datos("cobertura")
     else:
         todas = tabla[tabla["operacion"] == "todas"]
-        minimo = st.slider(
-            "Mostrar inmobiliarias con más de N barrios",
-            0,
-            int(todas["barrios"].max()),
-            0,
-            key="minimo_barrios",
+        maximo = int(todas["barrios"].max()) if todas["barrios"].notna().any() else 0
+        # Con un máximo de 0, Streamlit no puede dibujar el deslizador (mínimo = máximo).
+        minimo = (
+            st.slider(
+                "Mostrar inmobiliarias con más de N barrios", 0, maximo, 0, key="minimo_barrios"
+            )
+            if maximo > 0
+            else -1
         )
         st.plotly_chart(graficas.cobertura(tabla[tabla["barrios"] > minimo]), width="stretch")
         st.plotly_chart(graficas.concentracion(t["cobertura_comuna"]), width="stretch")

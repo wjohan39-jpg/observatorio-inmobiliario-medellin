@@ -138,6 +138,37 @@ En una revisión a mano de 15 parejas alta al azar, 13 se ven como el mismo inmu
 - Sin coordenadas (Maxibienes, Panorama y Activo Urbano), el emparejamiento depende del barrio oficial y nunca pasa de confianza media.
 - Los grupos media y baja pueden juntar varias unidades gemelas de una misma torre. El mayor grupo baja de la semana tiene 13 anuncios de 3 fuentes.
 
+## Agregados
+
+```bash
+uv run observatorio agregados   # después de limpiar y compartidos
+```
+
+Resume la última semana limpia y todo el histórico en `data/agregados/`. **Son los únicos datos que se publican en este repositorio.** No tienen ids, URL, coordenadas ni textos de anuncios, y el guardado rechaza cualquier tabla que traiga esas columnas.
+
+| Archivo | Pregunta | Qué tiene |
+|---|---|---|
+| `precios_zona` | 1. Precio por barrio | Mediana y cuartiles del precio y del precio por m², por barrio y comuna |
+| `cobertura_inmobiliaria` | 2 y 6. Cobertura y reconocimiento | Anuncios, barrios y comunas de cada inmobiliaria, y su comuna principal |
+| `cobertura_comuna` | 2. Dónde se concentra | % de los anuncios de cada inmobiliaria en cada comuna |
+| `economia_inmobiliaria` | 3. Economía | Medianas de precio e índice de precio relativo a su barrio |
+| `estratos_inmobiliaria` | 4. Estratos | Anuncios por estrato, declarados e inferidos por separado |
+| `compartidos_fuentes` | 7. Propiedades compartidas | Parejas y diferencia de precio por par de inmobiliarias |
+| `grupos_compartidos` | 7. Propiedades compartidas | Grupos anónimos: barrio, área, estrato y precio de cada inmobiliaria |
+| `evolucion_precios` | 8. Evolución | Precio por m² por semana |
+| `rotacion_inmobiliaria` | 8. Evolución | Nuevos, retirados, semanas publicado y cambios de precio por semana |
+
+**Reglas del análisis:**
+- **Base:** anuncios de Medellín que no son atípicos, uno por anuncio. Las filas repetidas por una fuente se cuentan una vez.
+- **Solo vivienda en los precios:** apartamento, apartaestudio, casa y los tres juntos. Mezclar un local con un apartamento no dice nada del precio de un barrio.
+- **Mínimo de publicación:** un precio se publica solo si resume 5 anuncios o más. Con menos, la mediana es casi el precio de un anuncio puntual. El barrio sigue contando en su comuna.
+- **Índice de precio relativo:** es el precio por m² de cada anuncio dividido por la mediana de su barrio, en la misma operación y tipo. Así una inmobiliaria no parece cara solo por trabajar en El Poblado. Un índice de 1,10 significa un 10 % por encima de su barrio.
+- **Estrato inferido:** Alnago y Puertabierta no publican estrato. Si en un barrio 5 anuncios o más declaran estrato y el más frecuente reúne el 60 % o más, ese estrato se asigna a los anuncios del barrio que no lo traen.
+  - Probada con los anuncios que sí lo declaran, la regla acierta en el 76 %. Por eso el inferido va siempre en su propia columna.
+- **Reputación (pregunta 5):** los términos de Google Places no permiten guardar calificaciones. Se consultan en vivo desde el dashboard.
+
+**Evolución:** cada semana se compara con la anterior que tiene datos, así una semana sin scraping no parece un retiro masivo. La duración publicada excluye los anuncios que ya estaban en la primera semana del histórico, porque no se sabe cuándo empezaron. Con una sola semana (2026-S46), estas tablas todavía no muestran retiros ni cambios.
+
 ## Desarrollo
 
 Requiere [uv](https://docs.astral.sh/uv/).

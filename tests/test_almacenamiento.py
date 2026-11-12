@@ -6,13 +6,17 @@ import pandas as pd
 import pytest
 
 from observatorio_inmobiliario.almacenamiento import (
+    COLUMNAS_PRIVADAS,
     ESQUEMA,
     ESQUEMA_GRUPOS,
     ESQUEMA_LIMPIO,
     ESQUEMA_PAREJAS,
+    TABLAS_AGREGADAS,
+    guardar_agregado,
     guardar_compartidos,
     guardar_limpio,
     guardar_observaciones,
+    leer_agregado,
     leer_compartidos,
     leer_limpio,
     leer_observaciones,
@@ -341,3 +345,39 @@ def test_leer_compartidos_filtra_por_semana(
 def test_semana_de() -> None:
     assert semana_de(date(2026, 11, 11)) == "2026-S46"
     assert semana_de(date(2027, 1, 1)) == "2026-S53"
+
+
+# --------------------------------------------------------------------- Agregados
+
+
+def test_guardar_y_leer_agregado(tmp_path: Path) -> None:
+    tabla = pd.DataFrame(
+        {
+            "semana": pd.Series(["2026-S46", "2026-S46"], dtype="string"),
+            "anuncios": pd.Series([5, None], dtype="Int64"),
+            "pct": pd.Series([12.5, float("nan")], dtype="float64"),
+        }
+    )
+
+    ruta = guardar_agregado(tabla, tmp_path, "precios_zona")
+
+    assert ruta == tmp_path / "precios_zona.parquet"
+    pd.testing.assert_frame_equal(leer_agregado(tmp_path, "precios_zona"), tabla)
+
+
+def test_tablas_agregadas() -> None:
+    assert len(TABLAS_AGREGADAS) == 9
+    assert "grupos_compartidos" in TABLAS_AGREGADAS
+
+
+def test_guardar_agregado_nombre_desconocido(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="no_existe"):
+        guardar_agregado(pd.DataFrame({"a": [1]}), tmp_path, "no_existe")
+
+
+@pytest.mark.parametrize("columna", ["id_fuente", "url_a", "latitud_b", "anunciante_origen"])
+def test_guardar_agregado_rechaza_columnas_privadas(tmp_path: Path, columna: str) -> None:
+    assert columna.removesuffix("_a").removesuffix("_b") in COLUMNAS_PRIVADAS
+    with pytest.raises(ValueError, match=columna):
+        guardar_agregado(pd.DataFrame({columna: ["x"]}), tmp_path, "precios_zona")
+    assert not (tmp_path / "precios_zona.parquet").exists()

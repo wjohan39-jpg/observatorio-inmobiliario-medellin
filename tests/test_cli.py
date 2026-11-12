@@ -9,7 +9,10 @@ import pytest
 
 from observatorio_inmobiliario import cli
 from observatorio_inmobiliario.almacenamiento import (
+    COLUMNAS_PRIVADAS,
+    TABLAS_AGREGADAS,
     guardar_observaciones,
+    leer_agregado,
     leer_compartidos,
     leer_limpio,
 )
@@ -297,3 +300,67 @@ def test_compartidos_semana_inexistente(tmp_path: Path, capsys: pytest.CaptureFi
 
     assert codigo == 1
     assert "no hay datos limpios de la semana 2025-S01" in capsys.readouterr().err
+
+
+# ------------------------------------------------------------------- agregados
+
+
+def _agregados(tmp_path: Path) -> list[str]:
+    return [
+        "agregados",
+        "--limpio",
+        str(tmp_path / "limpio"),
+        "--compartidos",
+        str(tmp_path / "compartidos"),
+        "--salida",
+        str(tmp_path / "agregados"),
+    ]
+
+
+def test_agregados_guarda_y_resume(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    limpio = _limpio(tmp_path)
+    assert (
+        cli.main(
+            ["compartidos", "--limpio", str(limpio), "--salida", str(tmp_path / "compartidos")]
+        )
+        == 0
+    )
+    capsys.readouterr()
+
+    assert cli.main(_agregados(tmp_path)) == 0
+
+    archivos = sorted(ruta.stem for ruta in (tmp_path / "agregados").iterdir())
+    assert archivos == sorted(TABLAS_AGREGADAS)
+    cobertura = leer_agregado(tmp_path / "agregados", "cobertura_inmobiliaria")
+    assert set(cobertura["fuente"]) == {"nutibara", "santafe"}
+    assert set(cobertura["semana"]) == {"2026-S46"}
+    salida = capsys.readouterr().out
+    assert "cobertura_inmobiliaria" in salida and "2026-S46" in salida
+
+
+def test_agregados_sin_columnas_privadas(tmp_path: Path) -> None:
+    limpio = _limpio(tmp_path)
+    cli.main(["compartidos", "--limpio", str(limpio), "--salida", str(tmp_path / "compartidos")])
+    assert cli.main(_agregados(tmp_path)) == 0
+
+    for nombre in TABLAS_AGREGADAS:
+        columnas = leer_agregado(tmp_path / "agregados", nombre).columns
+        base = {c.removesuffix("_a").removesuffix("_b") for c in columnas}
+        assert not base & COLUMNAS_PRIVADAS, nombre
+
+
+def test_agregados_sin_datos(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert cli.main(_agregados(tmp_path)) == 1
+
+    assert "no hay datos limpios en" in capsys.readouterr().err
+
+
+def test_agregados_sin_compartidos(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    _limpio(tmp_path)
+    capsys.readouterr()
+
+    assert cli.main(_agregados(tmp_path)) == 1
+
+    error = capsys.readouterr().err
+    assert "corre primero: observatorio compartidos" in error
+    assert not (tmp_path / "agregados").exists()

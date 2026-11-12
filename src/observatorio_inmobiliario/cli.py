@@ -7,6 +7,7 @@ Uso::
     observatorio catalogo                           # actualiza el catálogo oficial de barrios
     observatorio limpiar                            # limpia la última semana descargada
     observatorio compartidos                        # empareja anuncios de la última semana limpia
+    observatorio agregados                          # tablas públicas del análisis
 """
 
 import argparse
@@ -19,10 +20,13 @@ from pathlib import Path
 
 import pandas as pd
 
+from observatorio_inmobiliario import agregados
 from observatorio_inmobiliario.almacenamiento import (
+    guardar_agregado,
     guardar_compartidos,
     guardar_limpio,
     guardar_observaciones,
+    leer_compartidos,
     leer_limpio,
     leer_semana,
     semanas_disponibles,
@@ -35,6 +39,7 @@ from observatorio_inmobiliario.catalogo import (
     descargar_catalogo,
 )
 from observatorio_inmobiliario.emparejamiento import Confianza, agrupar, emparejar
+from observatorio_inmobiliario.evolucion import evolucion_precios, rotacion_inmobiliaria
 from observatorio_inmobiliario.fuentes import REGISTRO, crear_fuente
 from observatorio_inmobiliario.http import (
     ClienteCortes,
@@ -49,6 +54,7 @@ logger = logging.getLogger(__name__)
 SALIDA_POR_DEFECTO = Path("data/crudo")
 LIMPIO_POR_DEFECTO = Path("data/limpio")
 COMPARTIDOS_POR_DEFECTO = Path("data/compartidos")
+AGREGADOS_POR_DEFECTO = Path("data/agregados")
 _SEMANA = re.compile(r"\d{4}-S\d{2}")
 CADA_CUANTOS_REPORTAR = 100
 """Cada cuántos anuncios se registra el avance, para seguir corridas largas."""
@@ -162,6 +168,30 @@ def _crear_parser() -> argparse.ArgumentParser:
         type=Path,
         default=COMPARTIDOS_POR_DEFECTO,
         help=f"carpeta de parejas y grupos (por defecto: {COMPARTIDOS_POR_DEFECTO})",
+    )
+
+    tablas = comandos.add_parser(
+        "agregados",
+        help="genera las tablas agregadas del análisis (las que van al repo público)",
+        description="Resume la última semana limpia y el histórico, sin datos de anuncios.",
+    )
+    tablas.add_argument(
+        "--limpio",
+        type=Path,
+        default=LIMPIO_POR_DEFECTO,
+        help=f"carpeta de la tabla limpia (por defecto: {LIMPIO_POR_DEFECTO})",
+    )
+    tablas.add_argument(
+        "--compartidos",
+        type=Path,
+        default=COMPARTIDOS_POR_DEFECTO,
+        help=f"carpeta de parejas y grupos (por defecto: {COMPARTIDOS_POR_DEFECTO})",
+    )
+    tablas.add_argument(
+        "--salida",
+        type=Path,
+        default=AGREGADOS_POR_DEFECTO,
+        help=f"carpeta de las tablas agregadas (por defecto: {AGREGADOS_POR_DEFECTO})",
     )
     return parser
 
@@ -285,6 +315,41 @@ def _compartidos(semana: str | None, limpio: Path, salida: Path) -> int:
     return 0
 
 
+def _agregados(limpio: Path, compartidos: Path, salida: Path) -> int:
+    semanas = semanas_limpias(limpio)
+    if not semanas:
+        print(f"no hay datos limpios en {limpio}", file=sys.stderr)
+        return 1
+    semana = semanas[-1]
+    if not (compartidos / "parejas" / f"{semana}.parquet").exists():
+        print(
+            f"no hay parejas de la semana {semana} en {compartidos}; "
+            "corre primero: observatorio compartidos",
+            file=sys.stderr,
+        )
+        return 1
+
+    base = agregados.base_analisis(leer_limpio(limpio, semana))
+    parejas, grupos = leer_compartidos(compartidos, semana)
+    historico = leer_limpio(limpio)
+    tablas = {
+        "precios_zona": agregados.precios_zona(base, semana),
+        "cobertura_inmobiliaria": agregados.cobertura_inmobiliaria(base, semana),
+        "cobertura_comuna": agregados.cobertura_comuna(base, semana),
+        "economia_inmobiliaria": agregados.economia_inmobiliaria(base, semana),
+        "estratos_inmobiliaria": agregados.estratos_inmobiliaria(base, semana),
+        "compartidos_fuentes": agregados.compartidos_fuentes(parejas, semana),
+        "grupos_compartidos": agregados.grupos_compartidos(grupos, base, semana),
+        "evolucion_precios": evolucion_precios(historico),
+        "rotacion_inmobiliaria": rotacion_inmobiliaria(historico),
+    }
+    print(f"{semana}: tablas agregadas en {salida}")
+    for nombre, tabla in tablas.items():
+        guardar_agregado(tabla, salida, nombre)
+        print(f"  {nombre:<24} {len(tabla):>5} filas")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Ejecuta el comando y devuelve el código de salida (0 = éxito)."""
     args = _crear_parser().parse_args(argv)
@@ -298,6 +363,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _limpiar(args.semana, args.crudo, args.salida)
     if args.comando == "compartidos":
         return _compartidos(args.semana, args.limpio, args.salida)
+    if args.comando == "agregados":
+        return _agregados(args.limpio, args.compartidos, args.salida)
     return _scrape(
         args.fuente,
         args.salida,

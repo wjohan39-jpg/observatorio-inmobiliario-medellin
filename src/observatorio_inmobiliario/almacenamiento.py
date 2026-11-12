@@ -15,6 +15,9 @@ Las parejas y los grupos de inmuebles compartidos (ver
     data/compartidos/parejas/2026-S46.parquet
     data/compartidos/grupos_inmueble/2026-S46.parquet
 
+Las tablas agregadas del análisis van en ``data/agregados/<nombre>.parquet``. Son las únicas
+que se versionan en el repo público.
+
 Correr el scraper dos veces en la misma semana **sobrescribe** ese archivo, así que nunca
 quedan filas duplicadas. Una semana nueva crea un archivo nuevo, y así se acumula el
 histórico.
@@ -236,3 +239,47 @@ def leer_compartidos(
         _leer(list((directorio / "parejas").glob(patron)), ESQUEMA_PAREJAS),
         _leer(list((directorio / "grupos_inmueble").glob(patron)), ESQUEMA_GRUPOS),
     )
+
+
+TABLAS_AGREGADAS: Final = (
+    "precios_zona",
+    "cobertura_inmobiliaria",
+    "cobertura_comuna",
+    "economia_inmobiliaria",
+    "estratos_inmobiliaria",
+    "compartidos_fuentes",
+    "grupos_compartidos",
+    "evolucion_precios",
+    "rotacion_inmobiliaria",
+)
+"""Las tablas que se publican en ``data/agregados/``."""
+COLUMNAS_PRIVADAS: Final = frozenset(
+    {"id_fuente", "url", "latitud", "longitud", "anunciante_origen"}
+)
+"""Columnas que nunca pueden llegar al repo público (spec §7.1), con o sin sufijo ``_a``/``_b``."""
+
+
+def guardar_agregado(df: pd.DataFrame, directorio: Path, nombre: str) -> Path:
+    """Sobrescribe ``directorio/<nombre>.parquet`` con una tabla agregada y devuelve la ruta.
+
+    Es la última barrera antes del repo público: rechaza un nombre que no esté en
+    :data:`TABLAS_AGREGADAS` y cualquier columna de :data:`COLUMNAS_PRIVADAS`.
+    """
+    if nombre not in TABLAS_AGREGADAS:
+        raise ValueError(f"{nombre!r} no es una tabla agregada conocida")
+    privadas = [
+        c for c in df.columns if str(c).removesuffix("_a").removesuffix("_b") in COLUMNAS_PRIVADAS
+    ]
+    if privadas:
+        raise ValueError(f"{nombre}: columnas privadas que no pueden publicarse: {privadas}")
+    ruta = directorio / f"{nombre}.parquet"
+    _escribir(pa.Table.from_pandas(df, preserve_index=False), ruta)
+    return ruta
+
+
+def leer_agregado(directorio: Path, nombre: str) -> pd.DataFrame:
+    """Lee ``directorio/<nombre>.parquet`` con enteros y textos que admiten vacíos."""
+    df: pd.DataFrame = pq.read_table(directorio / f"{nombre}.parquet").to_pandas(
+        types_mapper=_TIPOS_PANDAS.get
+    )
+    return df

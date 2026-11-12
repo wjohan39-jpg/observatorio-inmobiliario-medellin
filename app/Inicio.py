@@ -4,6 +4,7 @@ import _ruta  # noqa: F401  (agrega src/ al path si el paquete no está instalad
 import streamlit as st
 
 from observatorio_inmobiliario.tablero import graficas, vista
+from observatorio_inmobiliario.tablero.formato import indicadores
 
 vista.configurar("Resumen del mercado")
 t = vista.tablas()
@@ -15,30 +16,10 @@ st.markdown(
     "Venta y arriendo se analizan siempre por separado."
 )
 
-cobertura = t["cobertura_inmobiliaria"]
 precios = t["precios_zona"]
-evolucion = t["evolucion_precios"]
-
-
-def _mediana_ciudad(operacion: str) -> str:
-    filas = evolucion[(evolucion["operacion"] == operacion) & (evolucion["tipo"] == "vivienda")]
-    filas = filas.dropna(subset=["precio_m2_mediana"])
-    if filas.empty:
-        return "—"
-    valor = float(filas.sort_values("semana")["precio_m2_mediana"].iloc[-1])
-    return vista.pesos(valor)
-
-
-todas = cobertura[cobertura["operacion"] == "todas"]
-barrios_con_precio = precios.loc[precios["nivel"] == "barrio", "codigo"].nunique()
-columnas = st.columns(5)
-columnas[0].metric("Anuncios analizados", vista.entero(int(todas["anuncios"].sum())))
-columnas[1].metric("Barrios con precio", str(barrios_con_precio))
-columnas[2].metric("m² de vivienda en venta", _mediana_ciudad("venta"), help="Mediana")
-columnas[3].metric(
-    "m² de vivienda en arriendo", _mediana_ciudad("arriendo"), help="Mediana mensual"
-)
-columnas[4].metric("Inmobiliarias", str(todas["fuente"].nunique()))
+ayudas = {"m² de vivienda en venta": "Mediana", "m² de vivienda en arriendo": "Mediana mensual"}
+for columna, (etiqueta, valor) in zip(st.columns(5), indicadores(t), strict=True):
+    columna.metric(etiqueta, valor, help=ayudas.get(etiqueta))
 
 st.subheader("Precio por m² por barrio")
 operacion = st.radio("Operación", vista.OPERACIONES, horizontal=True, key="operacion_inicio")

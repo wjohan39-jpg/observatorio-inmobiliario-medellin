@@ -166,7 +166,12 @@ def reconocimiento(cobertura: pd.DataFrame, reputacion: pd.DataFrame | None) -> 
     con_resenas = bool(tabla["resenas"].sum() > 0)
     componentes = ["anuncios", "barrios", *(["resenas"] if con_resenas else [])]
     normalizado = pd.DataFrame(
-        {c: tabla[c].astype("float64") / max(float(tabla[c].max()), 1.0) for c in componentes}
+        {
+            c: tabla[c].astype("float64") / max(float(tabla[c].max(skipna=True) or 0), 1.0)
+            if tabla[c].notna().any()
+            else tabla[c].astype("float64")
+            for c in componentes
+        }
     )
     tabla = tabla.assign(indice=normalizado.mean(axis=1).round(3), con_resenas=con_resenas)
     tabla = tabla.sort_values("indice", ascending=False)

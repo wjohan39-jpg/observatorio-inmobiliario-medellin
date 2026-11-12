@@ -314,3 +314,45 @@ Esta tarea necesita acciones del autor fuera del repo: crear la clave de Google 
 git add datos_referencia/sedes_google.csv README.md
 git commit -m "feat: sedes de Google Places y dashboard publicado"
 ```
+
+---
+
+### Task 6: Sitio estático en GitHub Pages (agregada el 2026-11-12)
+
+**Por qué:** el inicio de sesión de Streamlit Community Cloud falla desde todas las redes que probó el autor, incluidos los datos del celular, y Hugging Face ya solo permite Spaces estáticos gratis. GitHub Pages es gratis, no pide tarjeta y usa la cuenta de GitHub, que sí funciona. La app de Streamlit sigue en el repo para correrla en local o publicarla más adelante.
+
+**Files:**
+- Create: `src/observatorio_inmobiliario/tablero/formato.py` (sale de `vista.py`: `entero`, `pesos`, `indicadores`), `src/observatorio_inmobiliario/tablero/sitio.py`, `.github/workflows/pages.yml`
+- Modify: `vista.py` (reexporta el formato), `app/Inicio.py` (usa `indicadores`), `cli.py` (comando `sitio`), `.gitignore` (`sitio/`), `README.md`
+- Test: `tests/test_sitio.py`, `tests/test_cli.py`
+
+**Interfaces:**
+
+```python
+# tablero/formato.py
+def entero(valor: float) -> str
+def pesos(valor: float) -> str
+def indicadores(tablas: dict[str, pd.DataFrame]) -> list[tuple[str, str]]   # los 5 KPI de Inicio: (etiqueta, valor)
+# tablero/sitio.py
+def generar_sitio(tablas: dict[str, pd.DataFrame], geojson: dict[str, Any], salida: Path) -> Path   # salida/index.html
+```
+
+- El sitio tiene las mismas 6 secciones que las páginas. Como no hay selectores, venta y arriendo van una debajo de la otra.
+- Las tablas van como HTML y nunca incluyen columnas privadas.
+- plotly.js se carga una vez, desde su CDN (`include_plotlyjs="cdn"` en la primera figura).
+- Comando: `observatorio sitio [--agregados data/agregados] [--salida sitio]`.
+- Workflow `pages.yml`:
+  - Se dispara con un push a `main` que toque `data/agregados/**`, `src/**`, `uv.lock` o el propio workflow, y también a mano (`workflow_dispatch`).
+  - Pasos: `uv sync --locked`, `observatorio sitio --salida _sitio`, `actions/upload-pages-artifact` y `actions/deploy-pages`.
+
+**Pruebas:**
+
+```python
+def test_generar_sitio_con_datos_reales(tmp_path)   # las 6 secciones, ≥ 10 gráficas, plotly desde CDN, sin columnas privadas
+def test_generar_sitio_con_tablas_vacias(tmp_path)  # no falla; muestra "Sin datos" / "Todavía no hay datos"
+def test_indicadores()                              # 5 KPI con formato colombiano
+def test_cli_sitio(tmp_path)                        # exit 0 y escribe index.html
+def test_workflow_pages_es_yaml_valido()            # el workflow carga como YAML y tiene los permisos de Pages
+```
+
+- **Autor:** en GitHub, *Settings → Pages → Source: GitHub Actions*. Luego verificar el link `https://wjohan39-jpg.github.io/observatorio-inmobiliario-medellin/` y agregarlo al README.

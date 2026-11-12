@@ -14,27 +14,17 @@ import streamlit as st
 
 from observatorio_inmobiliario import reputacion
 from observatorio_inmobiliario.tablero.datos import AGREGADOS, cargar_agregados, cargar_geojson
+from observatorio_inmobiliario.tablero.formato import entero, pesos
 
 CACHE_GOOGLE_S: Final = 24 * 60 * 60
 """La reputación se guarda en memoria 24 horas; nunca en disco (spec §7.2).
 
 Place Details Enterprise tiene 1.000 consultas gratis al mes. Con unas 15 sedes, refrescar cada
 24 horas son unas 450 consultas al mes; cada 6 horas serían 1.800 y se pasaría del límite."""
+__all__ = ["entero", "pesos"]  # se reexportan para las páginas
+
 OPERACIONES: Final = ("venta", "arriendo")
 TIPOS: Final = ("vivienda", "apartamento", "apartaestudio", "casa")
-
-
-def entero(valor: float) -> str:
-    """Entero con punto de miles, como se escribe en Colombia: ``5630`` → ``"5.630"``."""
-    return f"{round(valor):,}".replace(",", ".")
-
-
-def pesos(valor: float) -> str:
-    """Pesos en formato colombiano: ``"$42.553"``, o en millones con coma: ``"$5,08 M"``."""
-    if valor >= 1_000_000:
-        millones = f"{valor / 1_000_000:,.2f}"  # 1,234.57 → 1.234,57
-        return "$" + millones.replace(",", "_").replace(".", ",").replace("_", ".") + " M"
-    return "$" + entero(valor)
 
 
 def configurar(titulo: str) -> None:

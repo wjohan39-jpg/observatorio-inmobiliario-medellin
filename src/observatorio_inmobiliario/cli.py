@@ -9,6 +9,7 @@ Uso::
     observatorio compartidos                        # empareja anuncios de la última semana limpia
     observatorio agregados                          # tablas públicas del análisis
     observatorio google buscar "Alnago Medellín"    # busca el place_id de una sede en Google
+    observatorio sitio                              # genera el sitio estático para GitHub Pages
 """
 
 import argparse
@@ -58,6 +59,7 @@ SALIDA_POR_DEFECTO = Path("data/crudo")
 LIMPIO_POR_DEFECTO = Path("data/limpio")
 COMPARTIDOS_POR_DEFECTO = Path("data/compartidos")
 AGREGADOS_POR_DEFECTO = Path("data/agregados")
+SITIO_POR_DEFECTO = Path("sitio")
 _SEMANA = re.compile(r"\d{4}-S\d{2}")
 CADA_CUANTOS_REPORTAR = 100
 """Cada cuántos anuncios se registra el avance, para seguir corridas largas."""
@@ -209,6 +211,24 @@ def _crear_parser() -> argparse.ArgumentParser:
         description="Busca sedes en Google e imprime id, nombre y dirección para copiarlos.",
     )
     buscar.add_argument("texto", help='texto de búsqueda, p. ej. "Alnago Medellín"')
+
+    sitio = comandos.add_parser(
+        "sitio",
+        help="genera el dashboard como sitio estático (index.html) para GitHub Pages",
+        description="Genera un index.html con las gráficas y tablas del dashboard.",
+    )
+    sitio.add_argument(
+        "--agregados",
+        type=Path,
+        default=AGREGADOS_POR_DEFECTO,
+        help=f"carpeta de las tablas agregadas (por defecto: {AGREGADOS_POR_DEFECTO})",
+    )
+    sitio.add_argument(
+        "--salida",
+        type=Path,
+        default=SITIO_POR_DEFECTO,
+        help=f"carpeta del sitio (por defecto: {SITIO_POR_DEFECTO})",
+    )
     return parser
 
 
@@ -386,6 +406,16 @@ def _google_buscar(texto: str) -> int:
     return 0
 
 
+def _sitio(agregados: Path, salida: Path) -> int:
+    # Se importa aquí: carga plotly, que el resto de comandos no necesita.
+    from observatorio_inmobiliario.tablero.datos import cargar_agregados, cargar_geojson
+    from observatorio_inmobiliario.tablero.sitio import generar_sitio
+
+    ruta = generar_sitio(cargar_agregados(agregados), cargar_geojson(), salida)
+    print(f"sitio generado en {ruta} ({ruta.stat().st_size // 1024} KB)")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Ejecuta el comando y devuelve el código de salida (0 = éxito)."""
     args = _crear_parser().parse_args(argv)
@@ -403,6 +433,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _agregados(args.limpio, args.compartidos, args.salida)
     if args.comando == "google":
         return _google_buscar(args.texto)
+    if args.comando == "sitio":
+        return _sitio(args.agregados, args.salida)
     return _scrape(
         args.fuente,
         args.salida,

@@ -1,0 +1,54 @@
+name: Sitio en GitHub Pages
+
+# Genera el dashboard como sitio estático y lo publica en GitHub Pages.
+# Corre cuando cambian los datos agregados o el código, y también a mano (Actions → Run workflow).
+on:
+  push:
+    branches: [main]
+    paths:
+      - "data/agregados/**"
+      - "src/**"
+      - "uv.lock"
+      - ".github/workflows/pages.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Una sola publicación a la vez; si llega otra, la anterior termina primero.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  construir:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Instalar dependencias
+        run: uv sync --locked --python 3.12
+
+      - name: Generar el sitio
+        run: uv run observatorio sitio --salida _sitio
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _sitio
+
+  publicar:
+    needs: construir
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.despliegue.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: despliegue

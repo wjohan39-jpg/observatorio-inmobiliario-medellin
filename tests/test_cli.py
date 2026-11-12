@@ -397,3 +397,16 @@ def test_google_buscar_sin_clave(
     monkeypatch.delenv("GOOGLE_PLACES_API_KEY", raising=False)
     assert cli.main(["google", "buscar", "Alnago"]) == 1
     assert "falta GOOGLE_PLACES_API_KEY" in capsys.readouterr().err
+
+
+# ----------------------------------------------------------------------- sitio
+
+
+def test_sitio_genera_index(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    from observatorio_inmobiliario.tablero.datos import AGREGADOS
+
+    codigo = cli.main(["sitio", "--agregados", str(AGREGADOS), "--salida", str(tmp_path / "sitio")])
+
+    assert codigo == 0
+    assert (tmp_path / "sitio" / "index.html").exists()
+    assert "index.html" in capsys.readouterr().out

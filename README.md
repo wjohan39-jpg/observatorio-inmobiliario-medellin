@@ -2,6 +2,7 @@
 
 [![CI](https://github.com/wjohan39-jpg/observatorio-inmobiliario-medellin/actions/workflows/ci.yml/badge.svg)](https://github.com/wjohan39-jpg/observatorio-inmobiliario-medellin/actions/workflows/ci.yml)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
+[![Dashboard](https://img.shields.io/badge/dashboard-en%20vivo-2c7fb8)](https://wjohan39-jpg.github.io/observatorio-inmobiliario-medellin/)
 
 Proyecto de análisis de datos de punta a punta: **extrae** anuncios de inmobiliarias de Medellín, los **valida y limpia**, los **guarda** con histórico semanal y los **analiza** en un dashboard web.
 
@@ -186,6 +187,28 @@ El notebook lee solo `data/agregados/`, así que se puede volver a correr desde 
 uv sync --group analisis
 uv run --group analisis jupyter nbconvert --to notebook --execute --inplace notebooks/01_analisis_exploratorio.ipynb
 ```
+
+## Dashboard
+
+**En vivo:** https://wjohan39-jpg.github.io/observatorio-inmobiliario-medellin/
+
+El dashboard tiene dos versiones con la misma información. Las dos leen solo `data/agregados/`, así que nunca muestran ids, enlaces ni coordenadas de anuncios.
+
+- **Sitio estático en GitHub Pages:** es el link de arriba. GitHub Actions (`.github/workflows/pages.yml`) lo genera con `observatorio sitio` y lo publica cada vez que cambian los datos agregados. Las gráficas son interactivas: zoom y detalle al pasar el mouse.
+- **App de Streamlit** (`app/`): 6 páginas con selectores. Se corre en local:
+
+  ```bash
+  uv run streamlit run app/Inicio.py
+  ```
+
+| Página | Qué muestra |
+|---|---|
+| Inicio | Indicadores del mercado y mapa del precio por m² por barrio |
+| Barrios | Barrios más caros y más baratos, y venta vs. arriendo por comuna |
+| Inmobiliarias | Cobertura, concentración por comuna, precio relativo a su barrio, estratos y reconocimiento |
+| Propiedades compartidas | Parejas por confianza y grupos anónimos con el precio de cada inmobiliaria |
+| Evolución | Precios por semana y rotación de inventario |
+| Metodología | Fuentes, limpieza, reglas de publicación, limitaciones y aviso |
 
 ## Desarrollo
 

@@ -201,3 +201,19 @@ def test_buscar_sedes() -> None:
     cuerpo = json.loads(peticion.content)
     assert cuerpo["textQuery"] == "Santa Fe Medellín"
     assert "locationBias" in cuerpo
+
+
+def test_reconocimiento_cobertura_vacia() -> None:
+    from observatorio_inmobiliario.tablero.datos import tablas_vacias
+
+    vacia = tablas_vacias()["cobertura_inmobiliaria"]  # columnas Int64, con NA
+    tabla = reconocimiento(vacia, None)
+    assert tabla.empty
+    assert list(tabla.columns) == [
+        "fuente",
+        "anuncios",
+        "barrios",
+        "resenas",
+        "indice",
+        "con_resenas",
+    ]

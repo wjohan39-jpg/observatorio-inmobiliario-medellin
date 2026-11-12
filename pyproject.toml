@@ -9,11 +9,13 @@ authors = [{ name = "wjohan39-jpg" }]
 dependencies = [
     "httpx>=0.28.1",
     "pandas>=3.1.1",
+    "plotly>=7.1.0",
     "protego>=0.7.0",
     "pyarrow>=26.0.1",
     "pydantic>=2",
     "selectolax>=1.0.2",
     "shapely>=2.2.0",
+    "streamlit>=1.67.0",
 ]
 
 [project.scripts]
@@ -58,6 +60,11 @@ packages = ["observatorio_inmobiliario"]
 [[tool.mypy.overrides]]
 # pyarrow no publica tipos. Su uso se limita a almacenamiento.py, que sí expone tipos.
 module = ["pyarrow", "pyarrow.*"]
+ignore_missing_imports = true
+
+[[tool.mypy.overrides]]
+# plotly tampoco publica tipos. Se usa solo en tablero/graficas.py, que devuelve go.Figure.
+module = ["plotly", "plotly.*"]
 ignore_missing_imports = true
 
 # ---------------------------------------------------------------- pytest

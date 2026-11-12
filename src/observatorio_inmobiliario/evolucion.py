@@ -1,14 +1,16 @@
 """Evolución en el tiempo (pregunta 8): precios por semana y rotación del inventario.
 
 Las funciones reciben la unión de todas las semanas limpias (``leer_limpio(directorio)``).
-Cada semana se compara con la **semana anterior que tiene datos**: si falta una semana del
-calendario, no se inventa un retiro masivo.
 
-* Un anuncio es **nuevo** si no estaba en la semana anterior, y **retirado** si estaba y ya no.
-  En la primera semana del histórico no hay con qué comparar: ``nuevos`` y la tasa de retiro
-  quedan nulos y ``retirados`` en 0.
+La rotación se mide **por inmobiliaria**: cada fuente se compara con su propia semana anterior
+con datos. Si su scraping falló una semana, o empezó a scrapearse más tarde que las demás, no
+se inventan retiros ni anuncios nuevos.
+
+* Un anuncio es **nuevo** si no estaba en la semana anterior de su fuente, y **retirado** si
+  estaba y ya no. En la primera semana de cada fuente no hay con qué comparar: ``nuevos`` y la
+  tasa de retiro quedan nulos y ``retirados`` en 0.
 * Las semanas publicado se cuentan como apariciones seguidas. Un anuncio que vuelve después de
-  desaparecer empieza a contar de nuevo. Los que ya estaban en la primera semana del histórico
+  desaparecer empieza a contar de nuevo. Los que ya estaban en la primera semana de su fuente
   no entran en la mediana, porque no se sabe cuándo empezaron.
 """
 
@@ -64,8 +66,12 @@ def evolucion_precios(limpio: pd.DataFrame) -> pd.DataFrame:
     if not tabla.empty:
         tabla["precio_m2"] = tabla["precio_m2"].astype("Float64")
         grupos = tabla.groupby(["semana", "operacion", "tipo"])
+        # Solo cuentan los anuncios con precio por m²: es el dato que se resume.
         tabla = pd.DataFrame(
-            {"anuncios": grupos.size(), "precio_m2_mediana": grupos["precio_m2"].median()}
+            {
+                "anuncios": grupos["precio_m2"].count(),
+                "precio_m2_mediana": grupos["precio_m2"].median(),
+            }
         ).reset_index()
         tabla = tabla[tabla["anuncios"] >= MINIMO_PUBLICACION]
         tabla["precio_m2_mediana"] = (
@@ -75,29 +81,37 @@ def evolucion_precios(limpio: pd.DataFrame) -> pd.DataFrame:
     return _tipar(tabla, COLUMNAS_EVOLUCION, {"anuncios": "Int64", "precio_m2_mediana": "Int64"})
 
 
-def _presencia(limpio: pd.DataFrame) -> tuple[pd.DataFrame, list[str]]:
+def _presencia(limpio: pd.DataFrame) -> pd.DataFrame:
     """Una fila por anuncio de Medellín y semana, con la posición de la semana y su racha.
 
-    ``inicio`` es la posición (0, 1, 2…) de la primera semana de la racha de apariciones
+    ``pos`` es la posición (0, 1, 2…) de la semana entre las semanas **con datos de esa
+    fuente**. ``inicio`` es la posición de la primera semana de la racha de apariciones
     seguidas a la que pertenece la fila.
     """
     datos = con_semana(limpio)
+    # Semanas con datos de cada fuente: cuenta cualquier anuncio, no solo los de Medellín.
+    semanas_fuente = datos.groupby("fuente")["semana"].unique()
+    posicion = {
+        (fuente, semana): i
+        for fuente, semanas in semanas_fuente.items()
+        for i, semana in enumerate(sorted(semanas))
+    }
     datos = datos[datos["es_medellin"].fillna(False).astype(bool)]
     unicos = [anuncios_unicos(semana) for _, semana in datos.groupby("semana")]
     datos = pd.concat(unicos, ignore_index=True) if unicos else datos.iloc[0:0]
-    semanas = sorted(datos["semana"].unique())
-    posicion = {s: i for i, s in enumerate(semanas)}
-    datos = datos.assign(pos=[posicion[s] for s in datos["semana"]])
+    datos = datos.assign(
+        pos=[posicion[(f, s)] for f, s in zip(datos["fuente"], datos["semana"], strict=True)]
+    )
     datos = datos.sort_values([*CLAVE, "pos"], kind="stable")
     otra_clave = (datos[CLAVE] != datos[CLAVE].shift()).fillna(True).any(axis=1)
     nueva_racha = (otra_clave | (datos["pos"].diff() != 1)).astype(bool)
     racha = nueva_racha.astype(int).cumsum()
     datos["inicio"] = datos["pos"].groupby(racha).transform("min")
-    return datos[[*CLAVE, "semana", "pos", "inicio", "precio"]], semanas
+    return datos[[*CLAVE, "semana", "pos", "inicio", "precio"]]
 
 
 def _resumen_semana(actual: pd.DataFrame, anterior: pd.DataFrame | None) -> pd.DataFrame:
-    """Rotación de una semana frente a la anterior con datos, por fuente y operación."""
+    """Rotación de una semana de una fuente frente a su semana anterior con datos."""
     if anterior is None:
         tabla = actual.groupby(_GRUPO).size().rename("anuncios").reset_index()
         nulo = float("nan")
@@ -152,12 +166,14 @@ def rotacion_inmobiliaria(limpio: pd.DataFrame) -> pd.DataFrame:
     Usa todos los anuncios de Medellín, también los atípicos: la marca de atípico puede
     cambiar de una semana a otra y eso no es una rotación.
     """
-    presencia, semanas = _presencia(limpio)
+    presencia = _presencia(limpio)
     partes = []
-    for i, semana in enumerate(semanas):
-        actual = presencia[presencia["pos"] == i]
-        anterior = presencia[presencia["pos"] == i - 1] if i > 0 else None
-        partes.append(_resumen_semana(actual, anterior).assign(semana=semana))
+    for _, de_la_fuente in presencia.groupby("fuente"):
+        for pos in sorted(de_la_fuente["pos"].unique()):
+            actual = de_la_fuente[de_la_fuente["pos"] == pos]
+            anterior = de_la_fuente[de_la_fuente["pos"] == pos - 1] if pos > 0 else None
+            semana = actual["semana"].iloc[0]
+            partes.append(_resumen_semana(actual, anterior).assign(semana=semana))
 
     tabla = pd.concat(partes, ignore_index=True) if partes else pd.DataFrame()
     if not tabla.empty:

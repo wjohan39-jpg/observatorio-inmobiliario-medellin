@@ -70,20 +70,19 @@ def con_vivienda(df: pd.DataFrame) -> pd.DataFrame:
 
 
 def _resumen_precios(grupos: DataFrameGroupBy) -> pd.DataFrame:  # type: ignore[type-arg]
-    """Anuncios, mediana y cuartiles del precio y del precio por m² de cada grupo."""
-    precio = grupos["precio"]
-    precio_m2 = grupos["precio_m2"]
-    return pd.DataFrame(
-        {
-            "anuncios": grupos.size(),
-            "precio_mediana": precio.median(),
-            "precio_p25": precio.quantile(0.25),
-            "precio_p75": precio.quantile(0.75),
-            "precio_m2_mediana": precio_m2.median(),
-            "precio_m2_p25": precio_m2.quantile(0.25),
-            "precio_m2_p75": precio_m2.quantile(0.75),
-        }
-    )
+    """Anuncios, mediana y cuartiles del precio y del precio por m² de cada grupo.
+
+    Cada estadística exige :data:`MINIMO_PUBLICACION` valores **con dato**, no filas: un
+    anuncio sin precio por m² no cuenta para la mediana del m². Si no los tiene, queda nula.
+    """
+    columnas = {}
+    for campo in ("precio", "precio_m2"):
+        valores = grupos[campo]
+        suficientes = valores.count() >= MINIMO_PUBLICACION
+        columnas[f"{campo}_mediana"] = valores.median().where(suficientes)
+        columnas[f"{campo}_p25"] = valores.quantile(0.25).where(suficientes)
+        columnas[f"{campo}_p75"] = valores.quantile(0.75).where(suficientes)
+    return pd.DataFrame({"anuncios": grupos.size(), **columnas})
 
 
 def _enteros(df: pd.DataFrame, columnas: list[str]) -> pd.DataFrame:
@@ -125,7 +124,8 @@ def precios_zona(base: pd.DataFrame, semana: str) -> pd.DataFrame:
     if tabla.empty:
         return _vacia(COLUMNAS_PRECIOS_ZONA, _TEXTO_PRECIOS_ZONA)
     tabla["semana"] = semana
-    tabla = tabla[tabla["anuncios"] >= MINIMO_PUBLICACION]
+    con_precio = tabla["precio_mediana"].notna() | tabla["precio_m2_mediana"].notna()
+    tabla = tabla[(tabla["anuncios"] >= MINIMO_PUBLICACION) & con_precio]
     tabla = _enteros(tabla, COLUMNAS_PRECIOS_ZONA[7:])
     tabla = tabla.astype({c: "string" for c in _TEXTO_PRECIOS_ZONA})
     orden = tabla.sort_values(["nivel", "codigo", "operacion", "tipo"], kind="stable")
@@ -265,8 +265,8 @@ def indice_relativo(base: pd.DataFrame) -> pd.Series:
 def economia_inmobiliaria(base: pd.DataFrame, semana: str) -> pd.DataFrame:
     """Precios de vivienda e índice relativo por inmobiliaria (pregunta 3).
 
-    Una fila por fuente, operación y tipo con al menos :data:`MINIMO_PUBLICACION` anuncios. La
-    mediana del índice es nula si menos de ese mínimo de anuncios tiene índice.
+    Una fila por fuente, operación y tipo con al menos :data:`MINIMO_PUBLICACION` anuncios. Cada
+    mediana es nula si menos de ese mínimo de anuncios tiene el dato (precio, m² o índice).
     """
     vivienda = con_vivienda(base.assign(indice=indice_relativo(base)))
     vivienda = vivienda.assign(
@@ -277,8 +277,12 @@ def economia_inmobiliaria(base: pd.DataFrame, semana: str) -> pd.DataFrame:
     tabla = pd.DataFrame(
         {
             "anuncios": grupos.size(),
-            "precio_mediana": grupos["precio"].median(),
-            "precio_m2_mediana": grupos["precio_m2"].median(),
+            "precio_mediana": grupos["precio"]
+            .median()
+            .where(grupos["precio"].count() >= MINIMO_PUBLICACION),
+            "precio_m2_mediana": grupos["precio_m2"]
+            .median()
+            .where(grupos["precio_m2"].count() >= MINIMO_PUBLICACION),
             "anuncios_indice": grupos["indice"].count(),
             "indice_relativo_mediana": grupos["indice"].median(),
         }

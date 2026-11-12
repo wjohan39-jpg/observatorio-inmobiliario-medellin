@@ -524,3 +524,38 @@ def test_compartidos_vacios(limpio: Any) -> None:
 
 def test_niveles_coinciden_con_confianza() -> None:
     assert [c.value for c in Confianza] == list(NIVELES)
+
+
+# ------------------------------------------------------- Revisión final del plan 6
+
+
+def test_minimo_cuenta_precios_no_filas(limpio: Any) -> None:
+    # 5 apartamentos, uno sin precio por m²: el precio total se publica (5), el m² no (4).
+    filas = _apartamentos(5)
+    filas[0]["precio_m2"] = None
+    barrio = _zona(precios_zona(base_analisis(limpio(*filas)), SEMANA), "barrio", "1101")
+    assert barrio["anuncios"] == 5
+    assert barrio["precio_mediana"] == 3_000_000
+    assert pd.isna(barrio["precio_m2_mediana"])
+    assert pd.isna(barrio["precio_m2_p25"])
+    assert pd.isna(barrio["precio_m2_p75"])
+
+
+def test_minimo_sin_ningun_precio_publicable(limpio: Any) -> None:
+    filas = _apartamentos(5)
+    for f in filas[:2]:
+        f["precio_m2"] = None
+        f["precio"] = None
+    tabla = precios_zona(base_analisis(limpio(*filas)), SEMANA)
+    assert (tabla["nivel"] == "barrio").sum() == 0
+
+
+def test_economia_minimo_por_estadistica(limpio: Any) -> None:
+    filas = _con_precio_m2(*[40_000.0] * 5)
+    filas[0]["precio_m2"] = None
+    vivienda = _una_fila(
+        economia_inmobiliaria(base_analisis(limpio(*filas)), SEMANA), tipo="vivienda"
+    )
+    assert vivienda["anuncios"] == 5
+    assert vivienda["precio_mediana"] == 4_000_000
+    assert pd.isna(vivienda["precio_m2_mediana"])

@@ -147,13 +147,13 @@ def test_rotacion_cuenta_atipicos_y_separa_fuentes(limpio: Any) -> None:
     }
 
 
-def test_fuente_que_desaparece(limpio: Any) -> None:
+def test_fuente_sin_datos_no_tiene_fila(limpio: Any) -> None:
+    # Una semana sin datos de una fuente es un scraping que no corrió: no hay fila de rotación.
     rotacion = rotacion_inmobiliaria(
         limpio(*_en(S45, "A"), *_en(S45, "N1", fuente="nutibara"), *_en(S46, "A"))
     )
-    nutibara = rotacion[(rotacion["fuente"] == "nutibara") & (rotacion["semana"] == "2026-S46")]
-    assert list(nutibara["anuncios"]) == [0]
-    assert list(nutibara["retirados"]) == [1]
+    nutibara = rotacion[rotacion["fuente"] == "nutibara"]
+    assert list(nutibara["semana"]) == ["2026-S45"]
 
 
 def test_evolucion_vacia(limpio: Any) -> None:
@@ -164,3 +164,48 @@ def test_evolucion_vacia(limpio: Any) -> None:
     assert list(rotacion.columns) == COLUMNAS_ROTACION
     assert str(rotacion["anuncios"].dtype) == "Int64"
     assert str(rotacion["tasa_retiro_pct"].dtype) == "float64"
+
+
+# ------------------------------------------------------- Revisión final del plan 6
+
+
+def test_evolucion_minimo_cuenta_precios(limpio: Any) -> None:
+    filas = _en(S46, "1", "2", "3", "4", "5", precio_m2=30_000.0)
+    filas[0]["precio_m2"] = None
+    assert evolucion_precios(limpio(*filas)).empty
+
+
+def test_fuente_que_empieza_tarde(limpio: Any) -> None:
+    rotacion = rotacion_inmobiliaria(
+        limpio(
+            *_en(S45, "A"),
+            *_en(S46, "A"),
+            *_en(S47, "A"),
+            *_en(S46, "X", "Y", fuente="nutibara"),
+            *_en(S47, "Y", fuente="nutibara"),
+        )
+    )
+    nutibara = rotacion[rotacion["fuente"] == "nutibara"].set_index("semana")
+    # Su primera semana es la primera de su histórico: no se sabe qué es nuevo.
+    assert pd.isna(nutibara.loc["2026-S46", "nuevos"])
+    assert pd.isna(nutibara.loc["2026-S46", "tasa_retiro_pct"])
+    # X ya estaba cuando empezó a scrapearse: no se sabe cuánto llevaba publicado.
+    assert nutibara.loc["2026-S47", "retirados"] == 1
+    assert pd.isna(nutibara.loc["2026-S47", "semanas_publicado_mediana"])
+
+
+def test_fuente_que_falla_una_semana(limpio: Any) -> None:
+    rotacion = rotacion_inmobiliaria(
+        limpio(
+            *_en(S45, "A"),
+            *_en(S46, "A"),
+            *_en(S47, "A"),
+            *_en(S45, "X", fuente="nutibara"),
+            *_en(S47, "X", fuente="nutibara"),
+        )
+    )
+    nutibara = rotacion[rotacion["fuente"] == "nutibara"].set_index("semana")
+    # El scraping de nutibara falló en S46: se compara S47 con S45, sin retiros falsos.
+    assert list(nutibara.index) == ["2026-S45", "2026-S47"]
+    assert nutibara.loc["2026-S47", "retirados"] == 0
+    assert nutibara.loc["2026-S47", "nuevos"] == 0

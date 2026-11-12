@@ -6,6 +6,7 @@ Uso::
     observatorio scrape santafe --max-paginas 2     # corrida corta de prueba
     observatorio catalogo                           # actualiza el catálogo oficial de barrios
     observatorio limpiar                            # limpia la última semana descargada
+    observatorio compartidos                        # empareja anuncios de la última semana limpia
 """
 
 import argparse
@@ -19,10 +20,13 @@ from pathlib import Path
 import pandas as pd
 
 from observatorio_inmobiliario.almacenamiento import (
+    guardar_compartidos,
     guardar_limpio,
     guardar_observaciones,
+    leer_limpio,
     leer_semana,
     semanas_disponibles,
+    semanas_limpias,
 )
 from observatorio_inmobiliario.catalogo import (
     RUTA_GEOJSON,
@@ -30,6 +34,7 @@ from observatorio_inmobiliario.catalogo import (
     Catalogo,
     descargar_catalogo,
 )
+from observatorio_inmobiliario.emparejamiento import Confianza, agrupar, emparejar
 from observatorio_inmobiliario.fuentes import REGISTRO, crear_fuente
 from observatorio_inmobiliario.http import (
     ClienteCortes,
@@ -43,6 +48,7 @@ logger = logging.getLogger(__name__)
 
 SALIDA_POR_DEFECTO = Path("data/crudo")
 LIMPIO_POR_DEFECTO = Path("data/limpio")
+COMPARTIDOS_POR_DEFECTO = Path("data/compartidos")
 _SEMANA = re.compile(r"\d{4}-S\d{2}")
 CADA_CUANTOS_REPORTAR = 100
 """Cada cuántos anuncios se registra el avance, para seguir corridas largas."""
@@ -132,6 +138,31 @@ def _crear_parser() -> argparse.ArgumentParser:
         default=LIMPIO_POR_DEFECTO,
         help=f"carpeta de la tabla limpia (por defecto: {LIMPIO_POR_DEFECTO})",
     )
+
+    compartidos = comandos.add_parser(
+        "compartidos",
+        help="busca el mismo inmueble publicado por distintas inmobiliarias",
+        description="Empareja anuncios de distintas fuentes y los agrupa por nivel de confianza.",
+    )
+    compartidos.add_argument(
+        "--semana",
+        type=_semana,
+        default=None,
+        metavar="AAAA-SNN",
+        help="semana ISO a emparejar (por defecto: la última limpia)",
+    )
+    compartidos.add_argument(
+        "--limpio",
+        type=Path,
+        default=LIMPIO_POR_DEFECTO,
+        help=f"carpeta de la tabla limpia (por defecto: {LIMPIO_POR_DEFECTO})",
+    )
+    compartidos.add_argument(
+        "--salida",
+        type=Path,
+        default=COMPARTIDOS_POR_DEFECTO,
+        help=f"carpeta de parejas y grupos (por defecto: {COMPARTIDOS_POR_DEFECTO})",
+    )
     return parser
 
 
@@ -213,6 +244,47 @@ def _limpiar(semana: str | None, crudo: Path, salida: Path) -> int:
     return 0
 
 
+def _resumen_compartidos(parejas: pd.DataFrame, grupos: pd.DataFrame) -> str:
+    """Parejas y grupos por confianza, y parejas alta o media por combinación de fuentes."""
+    niveles = [c.value for c in Confianza]
+    por_nivel = pd.DataFrame(
+        {
+            "parejas": parejas["confianza"].value_counts().reindex(niveles, fill_value=0),
+            "grupos": [grupos[f"grupo_{n}"].nunique() for n in niveles],
+            "dif. precio mediana %": parejas.groupby("confianza")["diferencia_precio_pct"]
+            .median()
+            .reindex(niveles),
+        },
+        index=niveles,
+    ).round(1)
+    fuertes = parejas[parejas["confianza"].isin([Confianza.ALTA.value, Confianza.MEDIA.value])]
+    por_fuentes = fuertes.groupby(["fuente_a", "fuente_b"]).size().rename("parejas alta o media")
+    texto = por_nivel.to_string()
+    if not por_fuentes.empty:
+        texto += "\n\n" + por_fuentes.to_string()
+    return texto
+
+
+def _compartidos(semana: str | None, limpio: Path, salida: Path) -> int:
+    semanas = semanas_limpias(limpio)
+    if not semanas:
+        print(f"no hay datos limpios en {limpio}", file=sys.stderr)
+        return 1
+    semana = semana or semanas[-1]
+    if semana not in semanas:
+        print(f"no hay datos limpios de la semana {semana} en {limpio}", file=sys.stderr)
+        return 1
+
+    parejas = emparejar(leer_limpio(limpio, semana))
+    grupos = agrupar(parejas)
+    rutas = guardar_compartidos(parejas, grupos, salida, semana)
+    print(f"{semana}: {len(parejas)} parejas y {len(grupos)} anuncios emparejados")
+    print(f"guardados en {', '.join(map(str, rutas))}")
+    print()
+    print(_resumen_compartidos(parejas, grupos))
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     """Ejecuta el comando y devuelve el código de salida (0 = éxito)."""
     args = _crear_parser().parse_args(argv)
@@ -224,6 +296,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _catalogo(args.salida)
     if args.comando == "limpiar":
         return _limpiar(args.semana, args.crudo, args.salida)
+    if args.comando == "compartidos":
+        return _compartidos(args.semana, args.limpio, args.salida)
     return _scrape(
         args.fuente,
         args.salida,

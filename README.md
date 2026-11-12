@@ -92,6 +92,52 @@ Resultado de la semana 2026-S46: 8.589 anuncios; 5.700 de Medellín; el 96,5 % c
 - Cuando un anuncio tiene coordenadas y nombre, los dos dan comunas distintas en el 14,5 % de los casos. Casi siempre son zonas en el borde entre dos comunas. Se usan las coordenadas.
 - Maxibienes, Panorama y Activo Urbano no publican coordenadas, así que su barrio depende del nombre. Activo Urbano casi siempre da solo la zona.
 
+## Propiedades compartidas
+
+```bash
+uv run observatorio compartidos                    # la última semana limpia
+uv run observatorio compartidos --semana 2026-S46  # una semana en particular
+```
+
+Busca el mismo inmueble publicado por **distintas** inmobiliarias. Escribe dos tablas por semana; ninguna borra ni cambia anuncios:
+
+- `data/compartidos/parejas/<semana>.parquet`: una fila por pareja, con la distancia, la diferencia de precio y un nivel de confianza.
+- `data/compartidos/grupos_inmueble/<semana>.parquet`: una fila por anuncio emparejado, con su grupo en cada nivel (`grupo_alta`, `grupo_media`, `grupo_baja`).
+
+**Qué se compara.** Entran los anuncios de Medellín que no son atípicos. Dos anuncios son candidatos si cumplen todo esto:
+- son de fuentes distintas;
+- tienen la misma operación, el mismo tipo y la misma comuna;
+- su área difiere un 3 % o menos;
+- tienen las mismas habitaciones, baños y estrato. Un dato que falta en un lado no descarta la pareja.
+
+**El precio no se usa para emparejar.** La diferencia de precio es lo que se quiere medir, y usarla para emparejar sesgaría la respuesta.
+
+| Confianza | Cuándo |
+|---|---|
+| Alta | Los dos tienen coordenadas y están a 100 m o menos |
+| Media | Los dos tienen coordenadas y están a 300 m o menos; o a alguno le faltan, pero están en el mismo barrio oficial con habitaciones, baños y estrato conocidos e iguales |
+| Baja | A alguno le faltan coordenadas, y están en el mismo barrio oficial pero falta alguno de esos datos |
+
+Los umbrales salen de los datos. En la semana 2026-S46, los pares a 100 m o menos difieren 2,4 % en precio (mediana); a más de 1 km difieren 25 %, y ya son coincidencias de características.
+
+**Apartamentos gemelos.** En una torre hay varias unidades iguales. Si un anuncio tiene más de una pareja en la misma otra fuente, no se sabe cuál es la buena: esas parejas se marcan como `ambigua` y bajan un nivel. Una baja ambigua se descarta.
+
+**Grupos por nivel.** Cada nivel tiene sus propios grupos, armados solo con las parejas de ese nivel o uno mayor. Por ejemplo, `grupo_media` usa las parejas alta y media. Así, una cadena de parejas débiles no une grupos fuertes. El id del grupo es la clave del menor de sus anuncios (`fuente:id:operación`).
+
+Resultado de la semana 2026-S46:
+
+| Confianza | Parejas | Grupos (ese nivel o mayor) | Diferencia de precio mediana |
+|---|---|---|---|
+| Alta | 53 | 49 | 2,0 % |
+| Media | 83 | 107 | 6,4 % |
+| Baja | 94 | 155 | 11,6 % |
+
+En una revisión a mano de 15 parejas alta al azar, 13 se ven como el mismo inmueble (mismo precio o casi, área idéntica, a menos de 80 m). En las parejas baja es frecuente que un precio sea el doble del otro: deben leerse como "posible" y no como "seguro".
+
+**Limitaciones:**
+- Sin coordenadas (Maxibienes, Panorama y Activo Urbano), el emparejamiento depende del barrio oficial y nunca pasa de confianza media.
+- Los grupos media y baja pueden juntar varias unidades gemelas de una misma torre. El mayor grupo baja de la semana tiene 13 anuncios de 3 fuentes.
+
 ## Desarrollo
 
 Requiere [uv](https://docs.astral.sh/uv/).

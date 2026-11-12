@@ -9,6 +9,12 @@ archivo por semana::
 
     data/limpio/2026-S46.parquet
 
+Las parejas y los grupos de inmuebles compartidos (ver
+:mod:`observatorio_inmobiliario.emparejamiento`) van en dos carpetas::
+
+    data/compartidos/parejas/2026-S46.parquet
+    data/compartidos/grupos_inmueble/2026-S46.parquet
+
 Correr el scraper dos veces en la misma semana **sobrescribe** ese archivo, así que nunca
 quedan filas duplicadas. Una semana nueva crea un archivo nuevo, y así se acumula el
 histórico.
@@ -74,6 +80,41 @@ ESQUEMA_LIMPIO: Final = pa.schema(
     ]
 )
 """Columnas crudas más las que agrega la limpieza, en el mismo orden que ``limpiar``."""
+
+ESQUEMA_PAREJAS: Final = pa.schema(
+    [
+        ("fuente_a", pa.string()),
+        ("id_fuente_a", pa.string()),
+        ("fuente_b", pa.string()),
+        ("id_fuente_b", pa.string()),
+        ("operacion", pa.string()),
+        ("tipo_normalizado", pa.string()),
+        ("comuna", pa.string()),
+        ("codigo_barrio_a", pa.string()),
+        ("codigo_barrio_b", pa.string()),
+        ("area_m2_a", pa.float64()),
+        ("area_m2_b", pa.float64()),
+        ("precio_a", pa.int64()),
+        ("precio_b", pa.int64()),
+        ("distancia_m", pa.float64()),
+        ("diferencia_precio_pct", pa.float64()),
+        ("ambigua", pa.bool_()),
+        ("confianza", pa.string()),
+    ]
+)
+"""Columnas de ``emparejar``, en su orden."""
+
+ESQUEMA_GRUPOS: Final = pa.schema(
+    [
+        ("fuente", pa.string()),
+        ("id_fuente", pa.string()),
+        ("operacion", pa.string()),
+        ("grupo_alta", pa.string()),
+        ("grupo_media", pa.string()),
+        ("grupo_baja", pa.string()),
+    ]
+)
+"""Columnas de ``agrupar``, en su orden."""
 
 _TIPOS_PANDAS: Final[dict[pa.DataType, Any]] = {
     pa.string(): pd.StringDtype(),
@@ -157,3 +198,36 @@ def guardar_limpio(df: pd.DataFrame, directorio: Path, semana: str) -> Path:
 def leer_limpio(directorio: Path, semana: str | None = None) -> pd.DataFrame:
     """Une las tablas limpias de ``directorio`` (o solo la de ``semana``)."""
     return _leer(list(directorio.glob(f"{semana or '*'}.parquet")), ESQUEMA_LIMPIO)
+
+
+def semanas_limpias(directorio: Path) -> list[str]:
+    """Semanas con tabla limpia, p. ej. ``["2026-S45", "2026-S46"]``."""
+    return sorted(ruta.stem for ruta in directorio.glob("*.parquet"))
+
+
+def guardar_compartidos(
+    parejas: pd.DataFrame, grupos: pd.DataFrame, directorio: Path, semana: str
+) -> list[Path]:
+    """Sobrescribe las parejas y los grupos de ``semana`` y devuelve las dos rutas."""
+    rutas = []
+    for nombre, df, esquema in (
+        ("parejas", parejas, ESQUEMA_PAREJAS),
+        ("grupos_inmueble", grupos, ESQUEMA_GRUPOS),
+    ):
+        ruta = directorio / nombre / f"{semana}.parquet"
+        _escribir(
+            pa.Table.from_pandas(df[esquema.names], schema=esquema, preserve_index=False), ruta
+        )
+        rutas.append(ruta)
+    return rutas
+
+
+def leer_compartidos(
+    directorio: Path, semana: str | None = None
+) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """``(parejas, grupos)`` de ``directorio``: todas las semanas, o solo ``semana``."""
+    patron = f"{semana or '*'}.parquet"
+    return (
+        _leer(list((directorio / "parejas").glob(patron)), ESQUEMA_PAREJAS),
+        _leer(list((directorio / "grupos_inmueble").glob(patron)), ESQUEMA_GRUPOS),
+    )

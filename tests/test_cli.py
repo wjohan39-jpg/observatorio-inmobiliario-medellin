@@ -8,7 +8,11 @@ from typing import Any
 import pytest
 
 from observatorio_inmobiliario import cli
-from observatorio_inmobiliario.almacenamiento import guardar_observaciones, leer_limpio
+from observatorio_inmobiliario.almacenamiento import (
+    guardar_observaciones,
+    leer_compartidos,
+    leer_limpio,
+)
 from observatorio_inmobiliario.http import ErrorDeDescarga
 from observatorio_inmobiliario.modelos import AnuncioNormalizado, Operacion
 
@@ -227,3 +231,69 @@ def test_limpiar_semana_mal_escrita(capsys: pytest.CaptureFixture[str]) -> None:
         cli.main(["limpiar", "--semana", "46"])
 
     assert "AAAA-SNN" in capsys.readouterr().err
+
+
+# ----------------------------------------------------------------- compartidos
+
+
+def _limpio(tmp_path: Path, fecha: date = date(2026, 11, 11)) -> Path:
+    """Limpia con el comando real dos anuncios del mismo apartamento en santafe y nutibara."""
+    comunes: dict[str, Any] = {
+        "fecha_observacion": fecha,
+        "operacion": Operacion.ARRIENDO,
+        "tipo_inmueble": "Apartamento",
+        "area_m2": 80.0,
+        "habitaciones": 3,
+        "banos": 2,
+        "municipio": "Medellín",
+        "latitud": 6.2087,  # parque Lleras
+        "longitud": -75.5676,
+    }
+    guardar_observaciones(
+        [
+            AnuncioNormalizado(fuente="santafe", id_fuente="S1", precio=2_000_000, **comunes),
+            AnuncioNormalizado(fuente="nutibara", id_fuente="N1", precio=2_200_000, **comunes),
+        ],
+        tmp_path / "crudo",
+    )
+    args = ["--crudo", str(tmp_path / "crudo"), "--salida", str(tmp_path / "limpio")]
+    assert cli.main(["limpiar", *args]) == 0
+    return tmp_path / "limpio"
+
+
+def test_compartidos_guarda_y_resume(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    limpio = _limpio(tmp_path)
+    _limpio(tmp_path, date(2026, 11, 3))  # semana anterior
+    capsys.readouterr()
+
+    codigo = cli.main(
+        ["compartidos", "--limpio", str(limpio), "--salida", str(tmp_path / "compartidos")]
+    )
+
+    assert codigo == 0
+    parejas, grupos = leer_compartidos(tmp_path / "compartidos")
+    assert list((tmp_path / "compartidos" / "parejas").iterdir()) == [
+        tmp_path / "compartidos" / "parejas" / "2026-S46.parquet"
+    ]
+    assert len(parejas) == 1
+    assert parejas.loc[0, "confianza"] == "alta"
+    assert parejas.loc[0, "diferencia_precio_pct"] == pytest.approx(10.0)
+    assert set(grupos["grupo_alta"]) == {"nutibara:N1:arriendo"}
+    salida = capsys.readouterr().out
+    assert "2026-S46" in salida
+    assert "alta" in salida and "nutibara" in salida
+
+
+def test_compartidos_sin_datos(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    assert cli.main(["compartidos", "--limpio", str(tmp_path / "vacio")]) == 1
+
+    assert "no hay datos limpios en" in capsys.readouterr().err
+
+
+def test_compartidos_semana_inexistente(tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
+    limpio = _limpio(tmp_path)
+
+    codigo = cli.main(["compartidos", "--semana", "2025-S01", "--limpio", str(limpio)])
+
+    assert codigo == 1
+    assert "no hay datos limpios de la semana 2025-S01" in capsys.readouterr().err

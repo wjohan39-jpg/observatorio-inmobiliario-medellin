@@ -7,16 +7,22 @@ import pytest
 
 from observatorio_inmobiliario.almacenamiento import (
     ESQUEMA,
+    ESQUEMA_GRUPOS,
     ESQUEMA_LIMPIO,
+    ESQUEMA_PAREJAS,
+    guardar_compartidos,
     guardar_limpio,
     guardar_observaciones,
+    leer_compartidos,
     leer_limpio,
     leer_observaciones,
     leer_semana,
     ruta_semana,
     semanas_disponibles,
+    semanas_limpias,
 )
 from observatorio_inmobiliario.catalogo import Catalogo
+from observatorio_inmobiliario.emparejamiento import agrupar, emparejar
 from observatorio_inmobiliario.limpieza import limpiar
 from observatorio_inmobiliario.modelos import AnuncioNormalizado, Operacion
 
@@ -234,3 +240,98 @@ def test_leer_limpio_sin_datos(tmp_path: Path) -> None:
 
     assert df.empty
     assert list(df.columns) == ESQUEMA_LIMPIO.names
+
+
+# --------------------------------------------------------------------- Compartidos
+
+
+def test_semanas_limpias(tmp_path: Path) -> None:
+    for semana in ("2026-S47", "2026-S46"):
+        (tmp_path / f"{semana}.parquet").touch()
+
+    assert semanas_limpias(tmp_path) == ["2026-S46", "2026-S47"]
+    assert semanas_limpias(tmp_path / "no-existe") == []
+
+
+@pytest.fixture
+def compartidos(tmp_path: Path, catalogo: Catalogo) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Parejas y grupos reales: el mismo apartamento en santafe y nutibara, y uno sin pareja."""
+    comunes: dict[str, Any] = {
+        "tipo_inmueble": "Apartamento",
+        "area_m2": 80.0,
+        "habitaciones": 3,
+        "banos": 2,
+        "municipio": "Medellín",
+        "latitud": 6.245,
+        "longitud": -75.595,
+    }
+    guardar_observaciones(
+        [
+            _anuncio("S1", precio=2_000_000, estrato=4, **comunes),
+            _anuncio("N1", fuente="nutibara", precio=2_100_000, **comunes),
+            _anuncio("S2", operacion=Operacion.VENTA, precio=400_000_000),
+        ],
+        tmp_path / "crudo",
+    )
+    parejas = emparejar(limpiar(leer_observaciones(tmp_path / "crudo"), catalogo))
+    assert len(parejas) == 1
+    return parejas, agrupar(parejas)
+
+
+def test_esquemas_compartidos_coinciden(compartidos: tuple[pd.DataFrame, pd.DataFrame]) -> None:
+    parejas, grupos = compartidos
+
+    assert ESQUEMA_PAREJAS.names == list(parejas.columns)
+    assert ESQUEMA_GRUPOS.names == list(grupos.columns)
+
+
+def test_guardar_y_leer_compartidos(
+    tmp_path: Path, compartidos: tuple[pd.DataFrame, pd.DataFrame]
+) -> None:
+    parejas, grupos = compartidos
+
+    rutas = guardar_compartidos(parejas, grupos, tmp_path / "compartidos", "2026-S46")
+    leidas, leidos = leer_compartidos(tmp_path / "compartidos")
+
+    assert rutas == [
+        tmp_path / "compartidos" / "parejas" / "2026-S46.parquet",
+        tmp_path / "compartidos" / "grupos_inmueble" / "2026-S46.parquet",
+    ]
+    pd.testing.assert_frame_equal(leidas, parejas)
+    pd.testing.assert_frame_equal(leidos, grupos)
+
+
+def test_guardar_compartidos_sobrescribe(
+    tmp_path: Path, compartidos: tuple[pd.DataFrame, pd.DataFrame]
+) -> None:
+    parejas, grupos = compartidos
+    directorio = tmp_path / "compartidos"
+
+    guardar_compartidos(parejas, grupos, directorio, "2026-S46")
+    guardar_compartidos(parejas.head(0), grupos.head(0), directorio, "2026-S46")
+
+    leidas, leidos = leer_compartidos(directorio, "2026-S46")
+    assert leidas.empty and leidos.empty
+
+
+def test_guardar_compartidos_vacios(tmp_path: Path, catalogo: Catalogo) -> None:
+    parejas = emparejar(limpiar(leer_observaciones(tmp_path / "no-existe"), catalogo))
+    directorio = tmp_path / "compartidos"
+
+    guardar_compartidos(parejas, agrupar(parejas), directorio, "2026-S46")
+    leidas, leidos = leer_compartidos(directorio, "2026-S46")
+
+    assert list(leidas.columns) == ESQUEMA_PAREJAS.names
+    assert list(leidos.columns) == ESQUEMA_GRUPOS.names
+    assert leidas.empty and leidos.empty
+
+
+def test_leer_compartidos_filtra_por_semana(
+    tmp_path: Path, compartidos: tuple[pd.DataFrame, pd.DataFrame]
+) -> None:
+    parejas, grupos = compartidos
+    guardar_compartidos(parejas, grupos, tmp_path, "2026-S46")
+    guardar_compartidos(parejas, grupos, tmp_path, "2026-S47")
+
+    assert len(leer_compartidos(tmp_path)[0]) == 2
+    assert len(leer_compartidos(tmp_path, "2026-S47")[0]) == 1

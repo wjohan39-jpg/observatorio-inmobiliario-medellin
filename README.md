@@ -165,7 +165,7 @@ Resume la última semana limpia y todo el histórico en `data/agregados/`. **Son
 - **Índice de precio relativo:** es el precio por m² de cada anuncio dividido por la mediana de su barrio, en la misma operación y tipo. Así una inmobiliaria no parece cara solo por trabajar en El Poblado. Un índice de 1,10 significa un 10 % por encima de su barrio.
 - **Estrato inferido:** Alnago y Puertabierta no publican estrato. Si en un barrio 5 anuncios o más declaran estrato y el más frecuente reúne el 60 % o más, ese estrato se asigna a los anuncios del barrio que no lo traen.
   - Probada con los anuncios que sí lo declaran, la regla acierta en el 76 %. Por eso el inferido va siempre en su propia columna.
-- **Reputación (pregunta 5):** los términos de Google Places no permiten guardar calificaciones. Se consultan en vivo desde el dashboard.
+- **Reputación (pregunta 5):** el módulo `reputacion.py` consulta en vivo la API oficial de Google Places (sus términos no permiten guardar calificaciones). Está **desactivada en la versión publicada**, porque la API exige una cuenta de facturación; se activa con una clave en `GOOGLE_PLACES_API_KEY`. Sin ella, el indicador de reconocimiento (pregunta 6) usa solo anuncios y barrios.
 
 **Evolución:** la rotación se mide por inmobiliaria. Cada una se compara con su propia semana anterior con datos, así un scraping que falló, o una fuente que se agregó tarde, no parece un retiro masivo ni un inventario nuevo. La duración publicada excluye los anuncios que ya estaban en la primera semana de su inmobiliaria, porque no se sabe cuándo empezaron. Con una sola semana (2026-S46), estas tablas todavía no muestran retiros ni cambios.
 

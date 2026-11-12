@@ -9,7 +9,7 @@
   - `observatorio_inmobiliario/tablero/` tiene funciones puras que reciben las tablas agregadas y devuelven DataFrames o figuras de plotly. Se prueban con pytest.
   - `app/` tiene los scripts de Streamlit: leen, llaman a esas funciones y muestran. Se prueban de punta a punta con `streamlit.testing.v1.AppTest`, sin navegador.
 - **Google Places** queda en un módulo aparte, `reputacion.py`.
-  - Usa `httpx` con timeout, una clave que se lee de los secrets y una caché de 6 horas.
+  - Usa `httpx` con timeout, una clave que se lee de los secrets y una caché de 24 horas (1.000 consultas gratis al mes).
   - Solo se guarda el `place_id` de cada sede, en `datos_referencia/sedes_google.csv` (spec §7.2).
 
 **Tech Stack:** Python 3.12+, Streamlit, plotly, pandas, httpx, pytest y respx. Las dependencias nuevas son **streamlit** y **plotly**, y van en las dependencias principales: el CI prueba las páginas y Streamlit Cloud instala desde `uv.lock`.
@@ -27,7 +27,7 @@
 - **El dashboard lee solo `data/agregados/` y `datos_referencia/`.** No lee `data/limpio`, `data/crudo` ni `data/compartidos`, y no necesita el repo privado: el spec lo permitía "si hace falta detalle", y no hace falta.
 - **Google Places** (spec §7.2):
   - Solo se piden `rating` y `userRatingCount` (nivel Enterprise, sin `reviews`).
-  - Nada se guarda en disco. La caché vive en memoria 6 horas (`st.cache_data(ttl=6 h)`).
+  - Nada se guarda en disco. La caché vive en memoria 24 horas (`st.cache_data(ttl=24 h)`): con unas 15 sedes son unas 450 consultas al mes, dentro de las 1.000 gratis de Place Details Enterprise.
   - Si una inmobiliaria tiene varias sedes, se suman sus reseñas y la calificación es el promedio ponderado por número de reseñas.
   - La clave va en `st.secrets["GOOGLE_PLACES_API_KEY"]` o en la variable de entorno del mismo nombre, nunca en el código.
   - Sin clave, la página de reputación muestra un aviso y el resto funciona.

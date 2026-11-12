@@ -46,8 +46,10 @@ st.markdown(
     "su barrio, que acierta en el 76 % de los casos comprobables, y se muestra aparte.\n"
     "- **Propiedades compartidas:** parejas con confianza alta, media o baja, según la "
     "distancia y los datos que coinciden. Nunca se presentan como seguras.\n"
-    "- **Reputación:** se consulta en vivo en la API oficial de **Google Places**. Sus "
-    "términos no permiten guardar las calificaciones, así que no hay histórico de reputación."
+    "- **Reputación:** el código consulta en vivo la API oficial de **Google Places**, cuyos "
+    "términos no permiten guardar las calificaciones. Está desactivada en la versión publicada "
+    "porque la API exige una cuenta de facturación; el indicador de reconocimiento usa entonces "
+    "solo anuncios y barrios."
 )
 
 st.header("Limitaciones")

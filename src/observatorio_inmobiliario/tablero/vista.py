@@ -14,8 +14,11 @@ import streamlit as st
 from observatorio_inmobiliario import reputacion
 from observatorio_inmobiliario.tablero.datos import cargar_agregados, cargar_geojson
 
-CACHE_GOOGLE_S: Final = 6 * 60 * 60
-"""La reputación se guarda en memoria 6 horas; nunca en disco (spec §7.2)."""
+CACHE_GOOGLE_S: Final = 24 * 60 * 60
+"""La reputación se guarda en memoria 24 horas; nunca en disco (spec §7.2).
+
+Place Details Enterprise tiene 1.000 consultas gratis al mes. Con unas 15 sedes, refrescar cada
+24 horas son unas 450 consultas al mes; cada 6 horas serían 1.800 y se pasaría del límite."""
 OPERACIONES: Final = ("venta", "arriendo")
 TIPOS: Final = ("vivienda", "apartamento", "apartaestudio", "casa")
 

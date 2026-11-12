@@ -171,3 +171,9 @@ def test_rotacion(reales: dict[str, pd.DataFrame]) -> None:
 def test_semanas(reales: dict[str, pd.DataFrame], vacias: dict[str, pd.DataFrame]) -> None:
     assert graficas.semanas(reales["evolucion_precios"]) == ["2026-S46"]
     assert graficas.semanas(vacias["evolucion_precios"]) == []
+
+
+def test_cache_google_dentro_del_nivel_gratuito() -> None:
+    # 1.000 consultas gratis al mes en Place Details Enterprise; margen para 20 sedes.
+    consultas_al_mes = 20 * 30 * (24 * 60 * 60 / vista.CACHE_GOOGLE_S)
+    assert consultas_al_mes <= 1_000

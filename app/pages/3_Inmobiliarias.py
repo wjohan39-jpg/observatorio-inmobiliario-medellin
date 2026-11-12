@@ -50,8 +50,10 @@ reputacion = vista.reputacion_en_vivo()
 with reputacion_tab:
     if reputacion is None:
         st.info(
-            "La reputación se consulta en vivo en Google Places y no hay clave configurada "
-            "o sedes registradas. El resto del dashboard funciona sin ella."
+            "La reputación (calificación y reseñas en Google) está desactivada en esta versión "
+            "publicada: la API de Google Places exige una cuenta de facturación. El código está "
+            "listo y se activa con una clave en `GOOGLE_PLACES_API_KEY`. El resto del dashboard "
+            "funciona sin ella."
         )
     else:
         st.dataframe(
@@ -66,7 +68,7 @@ with reputacion_tab:
             },
         )
         st.caption(
-            "Calificaciones de Google, consultadas en vivo y guardadas en memoria 6 horas. "
+            "Calificaciones de Google, consultadas en vivo y guardadas en memoria 24 horas. "
             "Con varias sedes, se suman las reseñas y se pondera la calificación."
         )
 

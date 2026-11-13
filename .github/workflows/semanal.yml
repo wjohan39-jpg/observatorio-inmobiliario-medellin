@@ -11,6 +11,10 @@ on:
         description: "Fuentes a correr, separadas por espacio (vacío = todas)"
         required: false
         default: ""
+      max_paginas:
+        description: "Máximo de páginas por fuente, para pruebas cortas (vacío = todas)"
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -44,6 +48,7 @@ jobs:
       - name: Correr el pipeline semanal
         env:
           FUENTES: ${{ inputs.fuentes }}
+          MAX_PAGINAS: ${{ inputs.max_paginas }}
         run: >-
           uv run observatorio semana
           --crudo datos-privados/crudo
@@ -51,6 +56,7 @@ jobs:
           --compartidos datos-privados/compartidos
           --resumen resumen.md
           ${FUENTES:+--fuentes $FUENTES}
+          ${MAX_PAGINAS:+--max-paginas $MAX_PAGINAS}
 
       - name: Mostrar el resumen en la corrida
         if: always()

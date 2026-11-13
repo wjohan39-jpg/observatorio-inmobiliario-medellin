@@ -29,7 +29,9 @@ def test_semanal_es_yaml_valido() -> None:
     flujo = _cargar("semanal.yml")
     disparadores = _disparadores(flujo)
     assert disparadores["schedule"] == [{"cron": "0 11 * * 1"}]
-    assert "fuentes" in disparadores["workflow_dispatch"]["inputs"]
+    entradas = disparadores["workflow_dispatch"]["inputs"]
+    assert "fuentes" in entradas
+    assert "max_paginas" in entradas
     assert flujo["permissions"] == {"contents": "write"}
     assert flujo["concurrency"]["group"] == "semanal"
     assert flujo["jobs"]["actualizar"]["timeout-minutes"] == 300
@@ -56,6 +58,7 @@ def test_semanal_rutas_privadas() -> None:
     assert len(ejecuta) == 1
     for opcion in ("--crudo", "--limpio", "--compartidos"):
         assert f"{opcion} datos-privados/" in ejecuta[0]
+    assert "--max-paginas $MAX_PAGINAS" in ejecuta[0]
     resumen = [p for p in _pasos_semanal() if "GITHUB_STEP_SUMMARY" in p.get("run", "")]
     assert resumen[0]["if"] == "always()"
 

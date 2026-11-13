@@ -30,8 +30,15 @@ def test_generar_sitio_con_datos_reales(tmp_path: Path, reales: dict[str, pd.Dat
         assert f'id="{seccion}"' in html, seccion
     assert html.count("Plotly.newPlot") >= 10
     assert html.count("cdn.plot.ly") == 1  # plotly.js se carga una sola vez
-    assert "2026-S46" in html
-    assert "Villa Carlota" in html
+    # Los datos cambian cada semana: se comprueba contra lo que hay en data/agregados.
+    assert str(reales["cobertura_inmobiliaria"]["semana"].max()) in html
+    precios = reales["precios_zona"]
+    venta = precios[
+        (precios["nivel"] == "barrio")
+        & (precios["operacion"] == "venta")
+        & (precios["tipo"] == "vivienda")
+    ].dropna(subset=["precio_m2_mediana"])
+    assert venta.sort_values("precio_m2_mediana").iloc[-1]["nombre"] in html
     for privada in ("id_fuente", "latitud", "longitud", "anunciante_origen"):
         assert privada not in html, privada
     assert '<html lang="es">' in html
@@ -53,7 +60,10 @@ def test_indicadores(reales: dict[str, pd.DataFrame]) -> None:
         "m² de vivienda en arriendo",
         "Inmobiliarias",
     ]
-    assert kpis["Anuncios analizados"] == "5.630"
+    cobertura = reales["cobertura_inmobiliaria"]
+    esperados = int(cobertura.loc[cobertura["operacion"] == "todas", "anuncios"].sum())
+    assert esperados > 0
+    assert kpis["Anuncios analizados"] == entero(esperados)
     assert kpis["Inmobiliarias"] == "9"
     assert kpis["m² de vivienda en venta"].endswith(" M")
 

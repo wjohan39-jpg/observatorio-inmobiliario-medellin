@@ -169,7 +169,10 @@ def test_rotacion(reales: dict[str, pd.DataFrame]) -> None:
 
 
 def test_semanas(reales: dict[str, pd.DataFrame], vacias: dict[str, pd.DataFrame]) -> None:
-    assert graficas.semanas(reales["evolucion_precios"]) == ["2026-S46"]
+    semanas = graficas.semanas(reales["evolucion_precios"])
+    assert semanas  # las semanas crecen con cada actualización semanal
+    assert semanas == sorted(semanas)
+    assert all(len(semana) == 8 and semana[4:6] == "-S" for semana in semanas)
     assert graficas.semanas(vacias["evolucion_precios"]) == []
 
 

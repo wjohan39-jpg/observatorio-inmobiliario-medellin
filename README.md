@@ -1,12 +1,14 @@
 # Observatorio inmobiliario de Medellín
 
 [![CI](https://github.com/wjohan39-jpg/observatorio-inmobiliario-medellin/actions/workflows/ci.yml/badge.svg)](https://github.com/wjohan39-jpg/observatorio-inmobiliario-medellin/actions/workflows/ci.yml)
+[![Actualización semanal](https://github.com/wjohan39-jpg/observatorio-inmobiliario-medellin/actions/workflows/semanal.yml/badge.svg)](https://github.com/wjohan39-jpg/observatorio-inmobiliario-medellin/actions/workflows/semanal.yml)
 ![Python](https://img.shields.io/badge/python-3.12%2B-blue)
+![Licencia](https://img.shields.io/badge/licencia-MIT-green)
 [![Dashboard](https://img.shields.io/badge/dashboard-en%20vivo-2c7fb8)](https://wjohan39-jpg.github.io/observatorio-inmobiliario-medellin/)
 
 Proyecto de análisis de datos de punta a punta: **extrae** anuncios de inmobiliarias de Medellín, los **valida y limpia**, los **guarda** con histórico semanal y los **analiza** en un dashboard web.
 
-> **Estado:** en construcción. Ver la [hoja de ruta](docs/superpowers/plans/2026-11-10-hoja-de-ruta.md).
+> **Estado:** completo y funcionando. Se actualiza solo cada lunes (ver [Automatización](#automatización)). La [hoja de ruta](docs/superpowers/plans/2026-11-10-hoja-de-ruta.md) tiene el detalle de cómo se construyó.
 
 ## Preguntas que responde
 
@@ -174,12 +176,12 @@ Resume la última semana limpia y todo el histórico en `data/agregados/`. **Son
 
 Del [notebook de análisis exploratorio](notebooks/01_analisis_exploratorio.ipynb), con los datos de la semana 2026-S46 (vivienda en Medellín):
 
-1. **El m² de vivienda en venta más caro cuesta 3,4 veces el más barato:** Villa Carlota (El Poblado) tiene una mediana de 10,4 millones por m², y Barrio Caicedo (comuna 9), 3,1 millones.
-2. **Las comunas más caras rinden menos en arriendo.** La rentabilidad bruta anual es 7,6 % en El Poblado y llega a 9,9 % en Villa Hermosa y San Javier (11,8 % en Guayabal).
-3. **Nutibara y Alnago son las de mayor cobertura** (183 y 179 barrios). Activo Urbano y Puertabierta son especialistas: el 88 % y el 78 % de sus anuncios están en El Poblado.
-4. **Frente a su propio barrio, la mayoría cobra casi lo mismo** (índice entre 0,99 y 1,03). Activo Urbano en arriendo queda un 14 % por encima, y Nutibara un 4 % por debajo (Santa Fe, un 10 % por debajo, pero con solo 5 anuncios comparables).
-5. **Nutibara y Panorama son las que más trabajan estratos 1 a 3** según el estrato que declaran (44 % y 40 %; Santa Fe llega al 76 %, pero con solo 38 anuncios). Activo Urbano casi no tiene (4 %). Alnago y Puertabierta no publican estrato: con el inferido de su barrio, Puertabierta queda en 2 %.
-6. **Hay 53 parejas de alta confianza entre inmobiliarias, con una diferencia de precio mediana de solo 2 %.** Nutibara y Villacruz publican el mismo precio exacto en dos de cada tres inmuebles que comparten, lo que encaja con inventario compartido por MLS.
+1. **El m² de vivienda en venta más caro de Medellín cuesta 4,8 veces el más barato:** Villa Carlota (El Poblado) tiene una mediana de 10,2 millones por m², y Eduardo Santos, 2,1 millones.
+2. **Las comunas más caras rinden menos en arriendo.** La rentabilidad bruta anual es 7,7 % en El Poblado y sube hasta 11,1 % en Popular y 10,3 % en San Javier y Buenos Aires.
+3. **Santa Fe, Nutibara y Alnago son las de mayor cobertura** (219, 182 y 181 barrios). Activo Urbano y Puertabierta son especialistas: el 89 % y el 78 % de sus anuncios están en El Poblado.
+4. **Frente a su propio barrio, la mayoría cobra casi lo mismo** (índice entre 0,99 y 1,00 en arriendo y 1,00 en venta). Nutibara en arriendo queda un 4 % por debajo y Puertabierta un 4 % por encima. Activo Urbano parece un 29 % más cara, pero con solo 10 anuncios comparables.
+5. **Casi todas dedican alrededor de un tercio de sus anuncios a estratos 1 a 3** según el estrato que declaran (Panorama 35 %, Maxibienes 33 %, Santa Fe 33 %, Nutibara 31 %). Uribienes baja al 24 % y Activo Urbano casi no tiene (4 %). Alnago y Puertabierta no publican estrato: con el inferido de su barrio, Alnago queda en 36 % y Puertabierta en 3 %.
+6. **Hay 96 parejas de alta confianza entre inmobiliarias, con una diferencia de precio mediana de solo 2 %.** Nutibara publica el mismo precio exacto que Villacruz en el 83 % de los inmuebles que comparten, y que Santa Fe en el 67 %, lo que encaja con inventario compartido por MLS.
 
 El notebook lee solo `data/agregados/`, así que se puede volver a correr desde un clon del repositorio:
 
@@ -191,6 +193,12 @@ uv run --group analisis jupyter nbconvert --to notebook --execute --inplace note
 ## Dashboard
 
 **En vivo:** https://wjohan39-jpg.github.io/observatorio-inmobiliario-medellin/
+
+![Resumen del mercado: indicadores y mapa del precio por m² por barrio](docs/img/sitio-inicio.png)
+
+| Barrios más baratos y más caros | Cobertura de cada inmobiliaria |
+|---|---|
+| ![Venta: los barrios más baratos y más caros por m²](docs/img/sitio-barrios.png) | ![Barrios cubiertos por inmobiliaria y dónde se concentra cada una](docs/img/sitio-inmobiliarias.png) |
 
 El dashboard tiene dos versiones con la misma información. Las dos leen solo `data/agregados/`, así que nunca muestran ids, enlaces ni coordenadas de anuncios.
 

@@ -47,7 +47,7 @@ Fuentes disponibles (corridas del 2026-11-11):
 
 | Fuente | Inmobiliaria | Cómo se obtienen los datos | Anuncios | Tiempo |
 |---|---|---|---|---|
-| `santafe` | Arrendamientos Santa Fe | API JSON, con detalle de cada anuncio | — | > 40 min |
+| `santafe` | Arrendamientos Santa Fe | API JSON, con detalle de cada anuncio | 2.298 | > 40 min |
 | `nutibara` | Arrendamientos Nutibara | API JSON que busca en un radio de ~3 km; se recorre una cuadrícula de 60 puntos | 982 | ~5 min |
 | `uribienes` | Uribienes | API JSON, consultada municipio por municipio | 727 | ~3 min |
 | `alnago` | Alnago | API JSON del mapa, una petición por municipio y operación (sin estrato) | 1.691 | ~30 s |
@@ -209,6 +209,48 @@ El dashboard tiene dos versiones con la misma información. Las dos leen solo `d
 | Propiedades compartidas | Parejas por confianza y grupos anónimos con el precio de cada inmobiliaria |
 | Evolución | Precios por semana y rotación de inventario |
 | Metodología | Fuentes, limpieza, reglas de publicación, limitaciones y aviso |
+
+## Automatización
+
+Cada lunes a las 6:00 a. m. (hora de Colombia) GitHub Actions actualiza todo sin intervención. El flujo está en `.github/workflows/semanal.yml`:
+
+```mermaid
+flowchart LR
+    A[Lunes 6:00 a. m.] --> B[Descarga de las 9 fuentes]
+    B --> C[Limpieza y propiedades compartidas]
+    C --> D[Agregados con mínimo de 5]
+    C --> E[(Repo privado de datos)]
+    D --> F[(Repo público: data/agregados)]
+    F --> G[Sitio en GitHub Pages]
+```
+
+- **Datos por anuncio:** van al repositorio **privado** `observatorio-inmobiliario-datos` (carpetas `crudo/`, `limpio/` y `compartidos/`). El workflow lo lee con el secret `DATOS_TOKEN`, un token que solo tiene acceso a ese repo.
+- **Datos públicos:** solo vuelven al repositorio público los agregados de `data/agregados/`, y cuando cambian.
+- **Sitio:** al terminar bien el workflow semanal, `pages.yml` reconstruye el sitio y lo publica.
+- **Dónde ver las corridas:** pestaña *Actions → Actualización semanal*. Cada corrida deja un resumen con las fuentes que funcionaron y cuántos anuncios trajo cada una.
+- **Si una fuente falla:** el pipeline sigue con las demás y el resumen la marca como fallida. Si fallan todas, no se toca nada y la corrida termina en error.
+
+### Correrlo a mano
+
+En GitHub: *Actions → Actualización semanal → Run workflow*. Acepta dos entradas opcionales:
+
+| Entrada | Para qué sirve | Ejemplo |
+|---|---|---|
+| `fuentes` | Correr solo algunas fuentes, separadas por espacio. Vacío corre las 9. | `santafe nutibara` |
+| `max_paginas` | Limitar las páginas por fuente, para pruebas cortas. Vacío trae todo. | `2` |
+
+Una corrida completa tarda varias horas, porque las fuentes se descargan una tras otra con un límite de velocidad conservador (ver la tabla de tiempos de arriba). El workflow tiene un tope de 300 minutos.
+
+**Primera corrida completa en GitHub Actions (2026-11-13):** tardó 2 h 17 min y las 9 fuentes funcionaron desde los servidores de GitHub, sin bloqueos. Trajo 10.767 anuncios limpios. Las fuentes que usan Cloudflare (Alnago y Santa Fe) también respondieron, así que no hay limitaciones que anotar por ahora. Si una fuente empieza a fallar desde GitHub, no se intenta evadir el bloqueo: se anota aquí.
+
+### Correrlo en local
+
+```bash
+uv run observatorio semana                          # las 9 fuentes, con detalle
+uv run observatorio semana --fuentes santafe --max-paginas 2   # prueba corta
+```
+
+Escribe en `data/crudo`, `data/limpio`, `data/compartidos` y `data/agregados`. Con `--resumen resumen.md` guarda además la tabla de resultados por fuente.
 
 ## Desarrollo
 

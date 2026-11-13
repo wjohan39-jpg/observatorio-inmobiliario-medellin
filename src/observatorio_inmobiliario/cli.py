@@ -10,6 +10,7 @@ Uso::
     observatorio agregados                          # tablas públicas del análisis
     observatorio google buscar "Alnago Medellín"    # busca el place_id de una sede en Google
     observatorio sitio                              # genera el sitio estático para GitHub Pages
+    observatorio semana                             # pipeline completo de la semana
 """
 
 import argparse
@@ -25,10 +26,12 @@ import pandas as pd
 
 from observatorio_inmobiliario import agregados
 from observatorio_inmobiliario.almacenamiento import (
+    TABLAS_AGREGADAS,
     guardar_agregado,
     guardar_compartidos,
     guardar_limpio,
     guardar_observaciones,
+    leer_agregado,
     leer_compartidos,
     leer_limpio,
     leer_semana,
@@ -212,6 +215,40 @@ def _crear_parser() -> argparse.ArgumentParser:
     )
     buscar.add_argument("texto", help='texto de búsqueda, p. ej. "Alnago Medellín"')
 
+    semana = comandos.add_parser(
+        "semana",
+        help="corre el pipeline completo de la semana (scrape, limpiar, compartidos, agregados)",
+        description=(
+            "Descarga todas las fuentes, una tras otra, y genera las tablas de la semana. "
+            "Si una fuente falla, sigue con las demás."
+        ),
+    )
+    semana.add_argument(
+        "--fuentes",
+        nargs="+",
+        choices=sorted(REGISTRO),
+        default=None,
+        metavar="FUENTE",
+        help="fuentes a descargar (por defecto: todas)",
+    )
+    for opcion, defecto in (
+        ("--crudo", SALIDA_POR_DEFECTO),
+        ("--limpio", LIMPIO_POR_DEFECTO),
+        ("--compartidos", COMPARTIDOS_POR_DEFECTO),
+        ("--agregados", AGREGADOS_POR_DEFECTO),
+    ):
+        semana.add_argument(opcion, type=Path, default=defecto, help=f"(por defecto: {defecto})")
+    semana.add_argument(
+        "--resumen", type=Path, default=None, help="archivo Markdown con el resumen de la corrida"
+    )
+    semana.add_argument(
+        "--max-paginas",
+        type=_entero_positivo,
+        default=None,
+        metavar="N",
+        help="páginas por tipo de oferta como máximo; útil para pruebas",
+    )
+
     sitio = comandos.add_parser(
         "sitio",
         help="genera el dashboard como sitio estático (index.html) para GitHub Pages",
@@ -247,6 +284,12 @@ def _catalogo(salida: Path) -> int:
 
 
 def _scrape(fuente: str, salida: Path, *, con_detalle: bool, max_paginas: int | None) -> int:
+    guardados = _descargar(fuente, salida, con_detalle=con_detalle, max_paginas=max_paginas)
+    return 0 if guardados else 1
+
+
+def _descargar(fuente: str, salida: Path, *, con_detalle: bool, max_paginas: int | None) -> int:
+    """Descarga y guarda una fuente. Devuelve cuántos anuncios guardó; 0 si falló."""
     anuncios: list[AnuncioNormalizado] = []
     try:
         with crear_fuente(fuente, con_detalle=con_detalle, max_paginas=max_paginas) as origen:
@@ -257,15 +300,15 @@ def _scrape(fuente: str, salida: Path, *, con_detalle: bool, max_paginas: int | 
     except (ErrorDeDescarga, ErrorRutaBloqueadaPorRobots) as error:
         # No se guarda una corrida incompleta: sobrescribiría el archivo bueno de la semana.
         print(f"{fuente}: la descarga falló y no se guardó nada ({error})", file=sys.stderr)
-        return 1
+        return 0
 
     if not anuncios:
         print(f"{fuente}: 0 anuncios; puede que el sitio haya cambiado", file=sys.stderr)
-        return 1
+        return 0
 
     rutas = guardar_observaciones(anuncios, salida)
     print(f"{fuente}: {len(anuncios)} anuncios guardados en {', '.join(map(str, rutas))}")
-    return 0
+    return len(anuncios)
 
 
 def _resumen(limpio: pd.DataFrame) -> pd.DataFrame:
@@ -406,6 +449,71 @@ def _google_buscar(texto: str) -> int:
     return 0
 
 
+def _semana_completa(
+    fuentes: list[str] | None,
+    *,
+    crudo: Path,
+    limpio: Path,
+    compartidos: Path,
+    agregados: Path,
+    resumen: Path | None,
+    max_paginas: int | None,
+) -> int:
+    """Pipeline completo de la semana. Una fuente que falla no detiene a las demás.
+
+    Si ninguna fuente trae anuncios no se toca nada: las tablas de la semana anterior siguen
+    siendo las publicadas.
+    """
+    resultados: dict[str, str | int] = {}
+    for fuente in sorted(set(fuentes or REGISTRO)):
+        try:
+            guardados = _descargar(fuente, crudo, con_detalle=True, max_paginas=max_paginas)
+        except Exception as error:  # una fuente rota no puede tumbar la semana
+            logger.exception("%s: error inesperado", fuente)
+            print(f"{fuente}: error inesperado ({type(error).__name__})", file=sys.stderr)
+            guardados = 0
+        resultados[fuente] = guardados if guardados else "falló"
+
+    codigo = 0
+    if not any(isinstance(r, int) for r in resultados.values()):
+        print("ninguna fuente trajo anuncios; no se actualizó nada", file=sys.stderr)
+        codigo = 1
+    else:
+        # Cada paso solo corre si el anterior funcionó (``or`` corta en el primer error).
+        codigo = (
+            _limpiar(None, crudo, limpio)
+            or _compartidos(None, limpio, compartidos)
+            or _agregados(limpio, compartidos, agregados)
+        )
+
+    if resumen is not None:
+        resumen.write_text(_resumen_semana(resultados, limpio, agregados, codigo), "utf-8")
+    return codigo
+
+
+def _resumen_semana(
+    resultados: dict[str, str | int], limpio: Path, agregados: Path, codigo: int
+) -> str:
+    """Resumen en Markdown de la corrida, para la página del workflow."""
+    semanas = semanas_limpias(limpio)
+    lineas = [
+        f"## Actualización semanal: {semanas[-1] if semanas else 'sin datos'}",
+        "",
+        "| Fuente | Anuncios | Estado |",
+        "|---|---|---|",
+    ]
+    for fuente, resultado in resultados.items():
+        ok = isinstance(resultado, int)
+        lineas.append(f"| {fuente} | {resultado if ok else 0} | {'ok' if ok else 'falló'} |")
+    lineas += ["", "| Tabla agregada | Filas |", "|---|---|"]
+    for nombre in TABLAS_AGREGADAS:
+        ruta = agregados / f"{nombre}.parquet"
+        filas = len(leer_agregado(agregados, nombre)) if ruta.exists() else "—"
+        lineas.append(f"| {nombre} | {filas} |")
+    lineas += ["", "Resultado: " + ("✅ actualizado" if codigo == 0 else "❌ con errores")]
+    return "\n".join(lineas) + "\n"
+
+
 def _sitio(agregados: Path, salida: Path) -> int:
     # Se importa aquí: carga plotly, que el resto de comandos no necesita.
     from observatorio_inmobiliario.tablero.datos import cargar_agregados, cargar_geojson
@@ -433,6 +541,16 @@ def main(argv: Sequence[str] | None = None) -> int:
         return _agregados(args.limpio, args.compartidos, args.salida)
     if args.comando == "google":
         return _google_buscar(args.texto)
+    if args.comando == "semana":
+        return _semana_completa(
+            args.fuentes,
+            crudo=args.crudo,
+            limpio=args.limpio,
+            compartidos=args.compartidos,
+            agregados=args.agregados,
+            resumen=args.resumen,
+            max_paginas=args.max_paginas,
+        )
     if args.comando == "sitio":
         return _sitio(args.agregados, args.salida)
     return _scrape(

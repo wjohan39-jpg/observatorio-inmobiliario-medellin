@@ -410,3 +410,146 @@ def test_sitio_genera_index(tmp_path: Path, capsys: pytest.CaptureFixture[str]) 
     assert codigo == 0
     assert (tmp_path / "sitio" / "index.html").exists()
     assert "index.html" in capsys.readouterr().out
+
+
+# ---------------------------------------------------------------------- semana
+
+
+class FuenteSemana:
+    """Fuente falsa con anuncios de Medellín completos (pasan la limpieza)."""
+
+    def __init__(self, nombre: str, cantidad: int = 6, error: Exception | None = None) -> None:
+        self.nombre, self._cantidad, self._error = nombre, cantidad, error
+
+    def listar_anuncios(self) -> Iterator[AnuncioNormalizado]:
+        if self._error is not None:
+            raise self._error
+        for i in range(self._cantidad):
+            yield AnuncioNormalizado(
+                fuente=self.nombre,
+                id_fuente=f"{self.nombre}-{i}",
+                fecha_observacion=date(2026, 11, 11),
+                operacion=Operacion.ARRIENDO,
+                tipo_inmueble="Apartamento",
+                precio=2_000_000 + i * 10_000,
+                area_m2=60.0 + i,
+                habitaciones=2,
+                banos=1,
+                estrato=3,
+                municipio="Medellín",
+                latitud=6.2087,  # parque Lleras
+                longitud=-75.5676,
+            )
+
+
+@pytest.fixture
+def fuentes_semana(monkeypatch: pytest.MonkeyPatch) -> dict[str, Exception | None]:
+    """Reemplaza ``crear_fuente``; el diccionario dice qué error lanza cada fuente."""
+    errores: dict[str, Exception | None] = {"nutibara": None, "santafe": None}
+
+    @contextmanager
+    def crear(nombre: str, **_: Any) -> Iterator[FuenteSemana]:
+        yield FuenteSemana(nombre, error=errores.get(nombre))
+
+    monkeypatch.setattr(cli, "crear_fuente", crear)
+    return errores
+
+
+def _args_semana(tmp_path: Path, *extra: str) -> list[str]:
+    return [
+        "semana",
+        "--fuentes",
+        "nutibara",
+        "santafe",
+        "--crudo",
+        str(tmp_path / "crudo"),
+        "--limpio",
+        str(tmp_path / "limpio"),
+        "--compartidos",
+        str(tmp_path / "compartidos"),
+        "--agregados",
+        str(tmp_path / "agregados"),
+        *extra,
+    ]
+
+
+def test_semana_corre_todo(tmp_path: Path, fuentes_semana: dict[str, Any]) -> None:
+    assert cli.main(_args_semana(tmp_path)) == 0
+
+    assert sorted(p.name for p in (tmp_path / "crudo").iterdir()) == ["nutibara", "santafe"]
+    assert [p.name for p in (tmp_path / "limpio").iterdir()] == ["2026-S46.parquet"]
+    assert (tmp_path / "compartidos" / "parejas" / "2026-S46.parquet").exists()
+    assert sorted(p.stem for p in (tmp_path / "agregados").iterdir()) == sorted(TABLAS_AGREGADAS)
+    cobertura = leer_agregado(tmp_path / "agregados", "cobertura_inmobiliaria")
+    assert set(cobertura["fuente"]) == {"nutibara", "santafe"}
+
+
+def test_semana_falla_parcial(
+    tmp_path: Path, fuentes_semana: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    fuentes_semana["nutibara"] = ErrorDeDescarga("sitio caído")
+    resumen = tmp_path / "resumen.md"
+
+    assert cli.main(_args_semana(tmp_path, "--resumen", str(resumen))) == 0
+
+    cobertura = leer_agregado(tmp_path / "agregados", "cobertura_inmobiliaria")
+    assert set(cobertura["fuente"]) == {"santafe"}
+    texto = resumen.read_text(encoding="utf-8")
+    assert "nutibara" in texto and "falló" in texto
+
+
+def test_semana_falla_total(
+    tmp_path: Path, fuentes_semana: dict[str, Any], capsys: pytest.CaptureFixture[str]
+) -> None:
+    assert cli.main(_args_semana(tmp_path)) == 0
+    antes = {p.name: p.stat().st_mtime_ns for p in (tmp_path / "agregados").iterdir()}
+    fuentes_semana["nutibara"] = ErrorDeDescarga("caído")
+    fuentes_semana["santafe"] = ErrorDeDescarga("caído")
+
+    assert cli.main(_args_semana(tmp_path)) == 1
+
+    assert "ninguna fuente trajo anuncios" in capsys.readouterr().err
+    despues = {p.name: p.stat().st_mtime_ns for p in (tmp_path / "agregados").iterdir()}
+    assert despues == antes
+
+
+def test_semana_excepcion_inesperada(tmp_path: Path, fuentes_semana: dict[str, Any]) -> None:
+    fuentes_semana["nutibara"] = RuntimeError("cambió el HTML")
+
+    assert cli.main(_args_semana(tmp_path)) == 0
+
+    assert [p.name for p in (tmp_path / "crudo").iterdir()] == ["santafe"]
+
+
+def test_semana_repetida(tmp_path: Path, fuentes_semana: dict[str, Any]) -> None:
+    assert cli.main(_args_semana(tmp_path)) == 0
+    filas = len(leer_limpio(tmp_path / "limpio"))
+    assert cli.main(_args_semana(tmp_path)) == 0
+
+    assert [p.name for p in (tmp_path / "limpio").iterdir()] == ["2026-S46.parquet"]
+    assert len(leer_limpio(tmp_path / "limpio")) == filas == 12
+
+
+def test_semana_resumen_markdown(tmp_path: Path, fuentes_semana: dict[str, Any]) -> None:
+    resumen = tmp_path / "resumen.md"
+    assert cli.main(_args_semana(tmp_path, "--resumen", str(resumen))) == 0
+
+    texto = resumen.read_text(encoding="utf-8")
+    assert "2026-S46" in texto
+    assert "| Fuente | Anuncios | Estado |" in texto
+    assert "| santafe | 6 | ok |" in texto
+    for nombre in TABLAS_AGREGADAS:
+        assert nombre in texto
+
+
+def test_semana_fuentes_elegidas(tmp_path: Path, fuentes_semana: dict[str, Any]) -> None:
+    args = _args_semana(tmp_path)
+    args[args.index("nutibara")] = "santafe"  # --fuentes santafe santafe → una sola vez
+    assert cli.main(args) == 0
+    assert [p.name for p in (tmp_path / "crudo").iterdir()] == ["santafe"]
+
+
+def test_semana_fuente_desconocida(capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        cli.main(["semana", "--fuentes", "no-existe"])
+    assert "invalid choice" in capsys.readouterr().err

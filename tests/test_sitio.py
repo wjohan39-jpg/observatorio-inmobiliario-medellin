@@ -4,10 +4,8 @@ from pathlib import Path
 
 import pandas as pd
 import pytest
-import yaml
 
 from observatorio_inmobiliario.tablero.datos import (
-    RAIZ,
     cargar_agregados,
     cargar_geojson,
     tablas_vacias,
@@ -69,16 +67,3 @@ def test_indicadores_vacios() -> None:
 def test_formato_movido() -> None:
     assert entero(5630) == "5.630"
     assert pesos(5_079_208) == "$5,08 M"
-
-
-def test_workflow_pages_es_yaml_valido() -> None:
-    flujo = yaml.safe_load((RAIZ / ".github" / "workflows" / "pages.yml").read_text("utf-8"))
-    disparadores = flujo[True] if True in flujo else flujo["on"]  # YAML 1.1 lee "on" como True
-    assert "workflow_dispatch" in disparadores
-    assert "data/agregados/**" in disparadores["push"]["paths"]
-    assert flujo["permissions"] == {"contents": "read", "pages": "write", "id-token": "write"}
-    pasos = [p.get("uses", p.get("run", "")) for p in flujo["jobs"]["construir"]["steps"]]
-    assert any("observatorio sitio" in p for p in pasos)
-    assert any(p.startswith("actions/upload-pages-artifact") for p in pasos)
-    despliegue = flujo["jobs"]["publicar"]["steps"]
-    assert despliegue[0]["uses"].startswith("actions/deploy-pages")

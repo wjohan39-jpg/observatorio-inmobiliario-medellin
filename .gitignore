@@ -2,6 +2,7 @@
 data/crudo/
 data/limpio/
 data/compartidos/
+datos-privados/
 
 # --- Sitio estático: lo genera GitHub Actions, no se versiona ------------
 sitio/

@@ -1,0 +1,75 @@
+name: Actualización semanal
+
+# Cada lunes descarga los anuncios, limpia, empareja compartidos y recalcula los agregados.
+# Los datos por anuncio van al repo PRIVADO; solo los agregados (con mínimo de 5) vuelven al público.
+on:
+  schedule:
+    - cron: "0 11 * * 1" # lunes 6:00 a. m. en Colombia
+  workflow_dispatch:
+    inputs:
+      fuentes:
+        description: "Fuentes a correr, separadas por espacio (vacío = todas)"
+        required: false
+        default: ""
+
+permissions:
+  contents: write
+
+concurrency:
+  group: semanal
+  cancel-in-progress: false
+
+jobs:
+  actualizar:
+    runs-on: ubuntu-latest
+    timeout-minutes: 300
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Descargar el repo privado de datos
+        uses: actions/checkout@v4
+        with:
+          repository: wjohan39-jpg/observatorio-inmobiliario-datos
+          token: ${{ secrets.DATOS_TOKEN }}
+          path: datos-privados
+
+      - name: Instalar uv
+        uses: astral-sh/setup-uv@v6
+        with:
+          enable-cache: true
+
+      - name: Instalar dependencias
+        run: uv sync --locked --python 3.12
+
+      - name: Correr el pipeline semanal
+        env:
+          FUENTES: ${{ inputs.fuentes }}
+        run: >-
+          uv run observatorio semana
+          --crudo datos-privados/crudo
+          --limpio datos-privados/limpio
+          --compartidos datos-privados/compartidos
+          --resumen resumen.md
+          ${FUENTES:+--fuentes $FUENTES}
+
+      - name: Mostrar el resumen en la corrida
+        if: always()
+        run: |
+          if [ -f resumen.md ]; then cat resumen.md >> "$GITHUB_STEP_SUMMARY"; fi
+
+      - name: Guardar datos en el repo privado
+        run: |
+          semana="$(date +%G-S%V)"
+          cd datos-privados
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git diff --cached --quiet || { git commit -m "chore(datos): semana ${semana}" && git push; }
+
+      - name: Guardar agregados en el repo público
+        run: |
+          semana="$(date +%G-S%V)"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add data/agregados
+          git diff --cached --quiet || { git commit -m "chore(agregados): semana ${semana}" && git push; }

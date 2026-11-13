@@ -10,6 +10,10 @@ on:
       - "src/**"
       - "uv.lock"
       - ".github/workflows/pages.yml"
+  # El push del semanal usa GITHUB_TOKEN y no dispara otros workflows, por eso se escucha aquí.
+  workflow_run:
+    workflows: ["Actualización semanal"]
+    types: [completed]
   workflow_dispatch:
 
 permissions:
@@ -24,6 +28,7 @@ concurrency:
 
 jobs:
   construir:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4

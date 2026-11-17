@@ -252,6 +252,7 @@ TABLAS_AGREGADAS: Final = (
     "compartidas_inmobiliaria",
     "desvio_precio",
     "cobertura_estrato",
+    "calidad_pipeline",
     "cobertura_inmobiliaria",
     "cobertura_comuna",
     "economia_inmobiliaria",

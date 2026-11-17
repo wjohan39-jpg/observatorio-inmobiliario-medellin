@@ -84,7 +84,7 @@ def _seccion(id_: str, titulo: str, contenido: list[str]) -> str:
 
 
 def generar_sitio(tablas: dict[str, pd.DataFrame], geojson: dict[str, Any], salida: Path) -> Path:
-    """Escribe ``salida/index.html`` con las 10 secciones del dashboard y devuelve su ruta."""
+    """Escribe ``salida/index.html`` con las 11 secciones del dashboard y devuelve su ruta."""
     figura = _Graficas()
     cobertura = tablas["cobertura_inmobiliaria"]
     semana = str(cobertura["semana"].iloc[0]) if not cobertura.empty else "sin datos"
@@ -284,6 +284,42 @@ def generar_sitio(tablas: dict[str, pd.DataFrame], geojson: dict[str, Any], sali
             "liquidez, que necesita varias semanas de datos.</p>",
         ],
     )
+    calidad_datos = tablas["calidad_pipeline"]
+    duplicados = graficas.resumen_duplicados(calidad_datos)
+    texto_duplicados = (
+        "<p>Todavía no hay datos de duplicados.</p>"
+        if duplicados is None
+        else (
+            f"<p><b>{entero(duplicados['duplicados_exactos'])}</b> duplicados exactos "
+            f"(mismo código y operación en la misma inmobiliaria). Entre inmobiliarias hay "
+            f"{entero(duplicados['parejas'])} parejas, {entero(duplicados['parejas_ambiguas'])} "
+            f"ambiguas y {entero(duplicados['parejas_dif_20'])} con más de 20 % de diferencia "
+            "de precio entre las de confianza media o mayor: señales de posibles errores de "
+            "emparejamiento. No se mide la repetición con pequeñas variaciones dentro de una "
+            "misma inmobiliaria.</p>"
+        )
+    )
+    seccion_calidad = _seccion(
+        "calidad",
+        "Calidad de los datos",
+        [
+            "<p>Sobre todos los anuncios de la semana, también los de otros municipios y los "
+            "atípicos, antes de excluir nada del análisis.</p>",
+            figura(graficas.faltantes(calidad_datos)),
+            figura(graficas.atipicos(calidad_datos)),
+            "<p>Se marcan, sin borrar, los precios fuera de rango, las áreas de vivienda fuera "
+            "de 10 a 2.000 m² y los precios por m² extremos de su grupo. Solo atrapa extremos.</p>",
+            figura(graficas.metodo_de_ubicacion(calidad_datos)),
+            figura(graficas.desacuerdo_de_ubicacion(calidad_datos)),
+            "<p>Solo se compara con coordenadas y un barrio declarado resoluble. Muchas "
+            "inmobiliarias escriben zonas coloquiales más amplias que el barrio oficial: parte "
+            "del desacuerdo es nomenclatura; el de comuna es más serio.</p>",
+            figura(graficas.grafias_por_barrio(calidad_datos)),
+            "<h3>Duplicados</h3>",
+            texto_duplicados,
+            _tabla(graficas.tabla_calidad_pipeline(calidad_datos)),
+        ],
+    )
     indice = reconocimiento(cobertura, None)
     inmobiliarias = _seccion(
         "inmobiliarias",
@@ -381,11 +417,12 @@ Datos de la semana <b>{escape(semana)}</b>.</div>
 <nav>
 <a href="#resumen">Resumen</a><a href="#barrios">Barrios</a><a href="#precios">Precios</a>
 <a href="#oferta">Oferta</a><a href="#cuota">Cuota</a><a href="#nichos">Nichos</a>
+<a href="#calidad">Calidad</a>
 <a href="#inmobiliarias">Inmobiliarias</a><a href="#compartidos">Compartidas</a>
 <a href="#evolucion">Evolución</a><a href="#metodologia">Metodología</a>
 </nav>
 <main>
-{resumen}{barrios}{analisis}{movimiento}{cuota_agencias}{nichos}{inmobiliarias}{compartidos}{evolucion}{metodologia}
+{resumen}{barrios}{analisis}{movimiento}{cuota_agencias}{nichos}{seccion_calidad}{inmobiliarias}{compartidos}{evolucion}{metodologia}
 </main>
 <footer>Generado a partir de <code>data/agregados/</code> ·
 <a href="{REPOSITORIO}">Código en GitHub</a></footer>

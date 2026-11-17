@@ -143,6 +143,10 @@ def _llamadas(tablas: dict[str, pd.DataFrame]) -> list[go.Figure]:
         graficas.estratos_por_comuna(tablas["cobertura_estrato"], "venta"),
         graficas.desvio_zonas(tablas["desvio_precio"], "venta", "bajo"),
         graficas.desvio_inmobiliarias(tablas["desvio_precio"], "arriendo"),
+        graficas.faltantes(tablas["calidad_pipeline"]),
+        graficas.atipicos(tablas["calidad_pipeline"]),
+        graficas.metodo_de_ubicacion(tablas["calidad_pipeline"]),
+        graficas.desacuerdo_de_ubicacion(tablas["calidad_pipeline"]),
     ]
 
 
@@ -572,6 +576,52 @@ def test_nichos_vacios(vacias: dict[str, pd.DataFrame]) -> None:
     assert graficas.desvio_zonas(vacias["desvio_precio"], "venta", "bajo").layout.title.text
     assert graficas.cobertura_estratos(vacias["cobertura_estrato"], "venta").layout.title.text
     assert graficas.tabla_nichos(vacias["cuota_zona"], _geojson_corto(), "venta", 1).shape[0] == 3
+
+
+def test_calidad_pipeline_con_datos_reales(reales: dict[str, pd.DataFrame]) -> None:
+    calidad = reales["calidad_pipeline"]
+    for figura in (
+        graficas.faltantes(calidad),
+        graficas.atipicos(calidad),
+        graficas.metodo_de_ubicacion(calidad),
+        graficas.desacuerdo_de_ubicacion(calidad),
+        graficas.grafias_por_barrio(calidad),
+    ):
+        assert figura.data
+    resumen = graficas.resumen_duplicados(calidad)
+    assert resumen is not None
+    assert resumen["parejas_ambiguas"] <= resumen["parejas"]
+    assert resumen["parejas_dif_20"] <= resumen["parejas_media_o_mayor"] <= resumen["parejas"]
+    tabla = graficas.tabla_calidad_pipeline(calidad)
+    assert tabla["Inmobiliaria"].iloc[-1] == "todas"
+    assert not {"id_fuente", "url", "latitud", "longitud"} & set(tabla.columns)
+
+
+def test_calidad_pipeline_suma_de_atipicos(reales: dict[str, pd.DataFrame]) -> None:
+    calidad = reales["calidad_pipeline"]
+    agencias = calidad[calidad["fuente"] != "todas"]
+    total = calidad[calidad["fuente"] == "todas"].iloc[0]
+    assert agencias["atipicos"].sum() <= total["atipicos"]
+    assert (calidad["atipicos_pct"].dropna().between(0, 100)).all()
+    assert (calidad["desacuerdo_comuna"].dropna() <= calidad["desacuerdo_barrio"].dropna()).all()
+    assert (
+        calidad["desacuerdo_barrio"].dropna() <= calidad["comparables_ubicacion"].dropna()
+    ).all()
+
+
+def test_desacuerdo_exige_comparables(reales: dict[str, pd.DataFrame]) -> None:
+    calidad = reales["calidad_pipeline"]
+    pocos = calidad.assign(comparables_ubicacion=graficas.MINIMO_COMPARABLES - 1)
+    figura = graficas.desacuerdo_de_ubicacion(pocos)
+    assert not figura.data  # sin comparables suficientes solo queda el aviso
+
+
+def test_calidad_pipeline_vacia(vacias: dict[str, pd.DataFrame]) -> None:
+    calidad = vacias["calidad_pipeline"]
+    assert graficas.resumen_duplicados(calidad) is None
+    assert graficas.tabla_calidad_pipeline(calidad).empty
+    assert graficas.faltantes(calidad).layout.title.text
+    assert graficas.grafias_por_barrio(calidad).layout.title.text
 
 
 # ---------------------------------------------------------------- Formato

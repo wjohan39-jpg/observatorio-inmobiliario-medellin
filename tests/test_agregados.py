@@ -5,6 +5,7 @@ import pytest
 
 from conftest import fila
 from observatorio_inmobiliario.agregados import (
+    COLUMNAS_CALIDAD_PIPELINE,
     COLUMNAS_COBERTURA_ESTRATO,
     COLUMNAS_COMPARTIDAS,
     COLUMNAS_DESVIO,
@@ -13,6 +14,7 @@ from observatorio_inmobiliario.agregados import (
     anuncios_unicos,
     base_analisis,
     calidad_inmobiliaria,
+    calidad_pipeline,
     cobertura_comuna,
     cobertura_estrato,
     cobertura_inmobiliaria,
@@ -1191,3 +1193,131 @@ def test_cobertura_estrato_vacia(limpio: Any) -> None:
     tabla = cobertura_estrato(base_analisis(limpio()), SEMANA)
     assert tabla.empty
     assert list(tabla.columns) == COLUMNAS_COBERTURA_ESTRATO
+
+
+# ------------------------------------------------------- Calidad del pipeline
+
+
+class _Ubic:
+    def __init__(self, codigo_barrio: str, comuna: str) -> None:
+        self.codigo_barrio, self.comuna = codigo_barrio, comuna
+
+
+class _CatalogoFalso:
+    """Resuelve cuatro nombres: dos coinciden con el barrio 1101 de la fila y dos no."""
+
+    _NOMBRES = {
+        "Laureles": _Ubic("1101", "11"),
+        "Poblado": _Ubic("1401", "14"),
+        "Conquistadores": _Ubic("1102", "11"),
+    }
+
+    def por_nombre(self, nombre: str | None) -> _Ubic | None:
+        return self._NOMBRES.get(nombre or "")
+
+
+def _calidad(*filas: dict[str, Any], limpio: Any, parejas: Any = None) -> pd.DataFrame:
+    datos = limpio(*filas)
+    sin_parejas = pd.DataFrame({"confianza": [], "ambigua": [], "diferencia_precio_pct": []})
+    return calidad_pipeline(
+        datos, sin_parejas if parejas is None else parejas, SEMANA, catalogo=_CatalogoFalso()
+    )
+
+
+def _de_calidad(tabla: pd.DataFrame, fuente: str) -> Any:
+    filas = tabla[tabla["fuente"] == fuente]
+    assert len(filas) == 1, (fuente, len(filas))
+    return filas.iloc[0]
+
+
+def test_calidad_faltantes_y_duplicados(limpio: Any) -> None:
+    filas = [
+        fila(id_fuente="1", area_m2=None),
+        fila(id_fuente="2", estrato=None),
+        fila(id_fuente="3", estrato=None, precio=None),
+        fila(id_fuente="4", codigo_barrio=None, barrio_normalizado=None, metodo_ubicacion=None),
+        fila(id_fuente="5"),
+        fila(id_fuente="5"),  # duplicado exacto
+    ]
+    tabla = _calidad(*filas, limpio=limpio)
+    santafe = _de_calidad(tabla, "santafe")
+    assert santafe["registros"] == 5
+    assert santafe["duplicados_exactos"] == 1
+    assert santafe["sin_area_pct"] == 20.0
+    assert santafe["sin_estrato_pct"] == 40.0
+    assert santafe["sin_precio_pct"] == 20.0
+    assert santafe["sin_barrio_oficial_pct"] == 20.0
+    assert santafe["ub_sin_resolver_pct"] == 20.0
+    assert santafe["ub_coordenadas_pct"] == 80.0
+    assert set(tabla["fuente"]) == {"santafe", "todas"}
+    assert _de_calidad(tabla, "todas")["registros"] == 5
+    assert list(tabla.columns) == COLUMNAS_CALIDAD_PIPELINE
+
+
+def test_calidad_atipicos_por_motivo(limpio: Any) -> None:
+    filas = _de("santafe", 5)
+    filas[0].update(es_atipico=True, motivo_atipico="precio_fuera_de_rango; precio_m2_extremo")
+    filas[1].update(es_atipico=True, motivo_atipico="area_fuera_de_rango")
+    santafe = _de_calidad(_calidad(*filas, limpio=limpio), "santafe")
+    assert santafe["atipicos"] == 2
+    assert santafe["atipicos_pct"] == 40.0
+    assert (santafe["atipico_precio"], santafe["atipico_area"], santafe["atipico_m2"]) == (1, 1, 1)
+
+
+def test_calidad_coordenadas_descartadas(limpio: Any) -> None:
+    filas = _de("santafe", 5)
+    filas[0].update(coordenadas_validas=False)  # trae coordenadas crudas pero no sirvieron
+    filas[1].update(latitud=None, longitud=None, coordenadas_validas=False)
+    santafe = _de_calidad(_calidad(*filas, limpio=limpio), "santafe")
+    assert santafe["coords_crudas"] == 4
+    assert santafe["coords_descartadas_pct"] == 25.0
+
+
+def test_calidad_desacuerdo_de_ubicacion(limpio: Any) -> None:
+    barrios = ["Laureles", "Poblado", "Conquistadores", "Inexistente", None]
+    filas = [fila(id_fuente=str(i), barrio=b) for i, b in enumerate(barrios)]
+    santafe = _de_calidad(_calidad(*filas, limpio=limpio), "santafe")
+    assert santafe["comparables_ubicacion"] == 3  # «Inexistente» y el vacío no se pueden comparar
+    assert santafe["desacuerdo_barrio"] == 2  # Poblado y Conquistadores no son el 1101
+    assert santafe["desacuerdo_comuna"] == 1  # solo Poblado cae en otra comuna
+
+
+def test_calidad_desacuerdo_exige_coordenadas(limpio: Any) -> None:
+    filas = [fila(id_fuente=str(i), barrio="Poblado", metodo_ubicacion="nombre") for i in range(5)]
+    santafe = _de_calidad(_calidad(*filas, limpio=limpio), "santafe")
+    assert santafe["comparables_ubicacion"] == 0
+
+
+def test_calidad_grafias_por_barrio(limpio: Any) -> None:
+    barrios = ["Laureles", "LAURELES", "Laureles ", "Laurel", "Laurel"]
+    filas = [fila(id_fuente=str(i), barrio=b) for i, b in enumerate(barrios)]
+    santafe = _de_calidad(_calidad(*filas, limpio=limpio), "santafe")
+    assert santafe["grafias_por_barrio"] == 2.0  # «laureles» y «laurel»; mayúsculas no cuentan
+
+
+def test_calidad_minimo_de_registros(limpio: Any) -> None:
+    filas = [*_de("santafe", 5), *_de("alnago", 4)]
+    assert set(_calidad(*filas, limpio=limpio)["fuente"]) == {"santafe", "todas"}
+
+
+def test_calidad_parejas(limpio: Any) -> None:
+    parejas = pd.DataFrame(
+        {
+            "confianza": ["alta", "media", "baja", "media"],
+            "ambigua": [False, True, False, False],
+            "diferencia_precio_pct": [5.0, 30.0, 50.0, 20.0],
+        }
+    )
+    total = _de_calidad(_calidad(*_de("santafe", 5), limpio=limpio, parejas=parejas), "todas")
+    assert total["parejas"] == 4
+    assert total["parejas_ambiguas"] == 1
+    assert total["parejas_media_o_mayor"] == 3
+    assert total["parejas_dif_20"] == 1  # 20 % no supera el umbral; 50 % es de confianza baja
+
+
+def test_calidad_pipeline_vacia(limpio: Any) -> None:
+    tabla = calidad_pipeline(limpio(), pd.DataFrame(), SEMANA)
+    assert tabla.empty
+    assert list(tabla.columns) == COLUMNAS_CALIDAD_PIPELINE
+    assert str(tabla["registros"].dtype) == "Int64"
+    assert str(tabla["sin_area_pct"].dtype) == "float64"

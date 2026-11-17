@@ -81,6 +81,7 @@ PAGINAS_2 = [
     "pages/8_Oferta_y_rotación.py",
     "pages/9_Cuota_y_perfil.py",
     "pages/10_Oportunidades_y_nichos.py",
+    "pages/11_Calidad_de_los_datos.py",
     "pages/4_Propiedades_compartidas.py",
     "pages/5_Evolución.py",
     "pages/6_Metodología.py",
@@ -157,6 +158,13 @@ def test_nichos_sin_columnas_privadas() -> None:
     for tabla in app.dataframe:
         columnas = {str(c).lower() for c in tabla.value.columns}
         assert not columnas & {"id_fuente", "url", "latitud", "longitud"}
+
+
+def test_calidad_muestra_duplicados() -> None:
+    app = _correr("pages/11_Calidad_de_los_datos.py")
+    etiquetas = [m.label for m in app.metric]
+    assert "Duplicados exactos" in etiquetas
+    assert app.dataframe
 
 
 def test_precios_sin_columnas_privadas() -> None:

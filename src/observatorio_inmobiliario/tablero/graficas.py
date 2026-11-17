@@ -8,6 +8,7 @@ Reglas comunes:
 * Cada inmobiliaria tiene el mismo color en todas las gráficas (:data:`COLORES_FUENTE`).
 """
 
+from collections.abc import Iterable
 from typing import Any, Final
 
 import pandas as pd
@@ -1621,3 +1622,179 @@ def tabla_desvio(desvio: pd.DataFrame, operacion: str) -> pd.DataFrame:
         "pct_alto": "Sobre (%)",
     }
     return filas.sort_values("pct_bajo", ascending=False)[list(columnas)].rename(columns=columnas)
+
+
+# ------------------------------------------------------- Calidad del pipeline
+
+MINIMO_COMPARABLES: Final = 20
+"""Anuncios comparables (nombre declarado y coordenadas) que necesita una inmobiliaria para
+mostrar su % de desacuerdo: con menos, un par de casos decide."""
+_FALTANTES: Final = {
+    "sin_precio_pct": "Precio",
+    "sin_area_pct": "Área",
+    "sin_estrato_pct": "Estrato",
+    "sin_barrio_declarado_pct": "Barrio declarado",
+    "sin_barrio_oficial_pct": "Barrio oficial",
+}
+_METODOS: Final = {
+    "ub_coordenadas_pct": "Por coordenadas",
+    "ub_alias_pct": "Por alias (nombre coloquial)",
+    "ub_nombre_pct": "Por nombre oficial",
+    "ub_sin_resolver_pct": "Sin resolver",
+}
+
+
+def _por_agencia(calidad: pd.DataFrame) -> pd.DataFrame:
+    """La calidad de cada inmobiliaria (sin la fila global)."""
+    return calidad[calidad["fuente"] != GLOBAL]
+
+
+def _flotantes(filas: pd.DataFrame, columnas: Iterable[str]) -> pd.DataFrame:
+    return filas.assign(
+        **{
+            c: filas[c].astype("Float64").to_numpy(dtype="float64", na_value=float("nan"))
+            for c in columnas
+        }
+    )
+
+
+def faltantes(calidad: pd.DataFrame) -> go.Figure:
+    """Mapa de calor: % de anuncios sin cada dato, por inmobiliaria (0 es lo mejor)."""
+    titulo = "Datos faltantes por inmobiliaria (% de sus anuncios)"
+    filas = _por_agencia(calidad)
+    if filas.empty:
+        return _sin_datos(titulo)
+    tabla = _flotantes(filas, _FALTANTES).set_index("fuente")[list(_FALTANTES)]
+    figura = px.imshow(
+        tabla.rename(columns=_FALTANTES),
+        text_auto=".1f",
+        aspect="auto",
+        color_continuous_scale="OrRd",
+        zmin=0,
+        zmax=100,
+        labels={"x": "", "y": "", "color": "%"},
+    )
+    figura.update_layout(title=titulo, template=_PLANTILLA)
+    return figura
+
+
+def atipicos(calidad: pd.DataFrame) -> go.Figure:
+    """Anuncios atípicos por inmobiliaria y motivo (un anuncio puede tener varios motivos)."""
+    titulo = "Anuncios atípicos o erróneos por inmobiliaria"
+    filas = _por_agencia(calidad)
+    if filas.empty:
+        return _sin_datos(titulo)
+    filas = _flotantes(filas, ["atipico_precio", "atipico_area", "atipico_m2", "atipicos_pct"])
+    figura = go.Figure()
+    for columna, nombre in (
+        ("atipico_precio", "Precio fuera de rango"),
+        ("atipico_area", "Área fuera de rango"),
+        ("atipico_m2", "Precio por m² extremo"),
+    ):
+        figura.add_bar(x=filas["fuente"], y=filas[columna], name=nombre)
+    figura.update_layout(title=titulo, template=_PLANTILLA, barmode="group", yaxis_title="Anuncios")
+    return figura
+
+
+def metodo_de_ubicacion(calidad: pd.DataFrame) -> go.Figure:
+    """Cómo se asignó el barrio a los anuncios de cada inmobiliaria (% de sus anuncios)."""
+    titulo = "Cómo se resolvió el barrio de cada inmobiliaria"
+    filas = _por_agencia(calidad)
+    if filas.empty:
+        return _sin_datos(titulo)
+    filas = _flotantes(filas, _METODOS)
+    figura = go.Figure()
+    for columna, nombre in _METODOS.items():
+        figura.add_bar(y=filas["fuente"], x=filas[columna], name=nombre, orientation="h")
+    figura.update_layout(
+        title=titulo, template=_PLANTILLA, barmode="stack", xaxis_title="% de sus anuncios"
+    )
+    return figura
+
+
+def desacuerdo_de_ubicacion(calidad: pd.DataFrame) -> go.Figure:
+    """% de anuncios cuyo barrio declarado no coincide con el de sus coordenadas."""
+    titulo = "Barrio declarado frente a barrio de las coordenadas"
+    filas = _por_agencia(calidad)
+    filas = filas[filas["comparables_ubicacion"].fillna(0) >= MINIMO_COMPARABLES]
+    if filas.empty:
+        return _sin_datos(titulo)
+    filas = _flotantes(filas, ["comparables_ubicacion", "desacuerdo_barrio", "desacuerdo_comuna"])
+    figura = go.Figure()
+    for columna, nombre, color in (
+        ("desacuerdo_barrio", "Otro barrio", "#fdae6b"),
+        ("desacuerdo_comuna", "Otra comuna", "#d94801"),
+    ):
+        figura.add_bar(
+            x=filas["fuente"],
+            y=filas[columna] / filas["comparables_ubicacion"] * 100,
+            name=nombre,
+            marker_color=color,
+            customdata=filas[["comparables_ubicacion"]],
+            hovertemplate="%{x}: %{y:.1f} % (de %{customdata[0]:.0f} comparables)<extra></extra>",
+        )
+    figura.update_layout(
+        title=titulo, template=_PLANTILLA, barmode="group", yaxis_title="% de los comparables"
+    )
+    return figura
+
+
+def grafias_por_barrio(calidad: pd.DataFrame) -> go.Figure:
+    """Grafías distintas por barrio oficial: dentro de cada inmobiliaria y entre todas."""
+    titulo = "Grafías distintas con que se nombra un mismo barrio"
+    filas = calidad[calidad["grafias_por_barrio"].notna()]
+    if filas.empty:
+        return _sin_datos(titulo)
+    filas = _flotantes(filas, ["grafias_por_barrio"]).sort_values("grafias_por_barrio")
+    figura = px.bar(
+        filas,
+        x="grafias_por_barrio",
+        y="fuente",
+        orientation="h",
+        labels={"grafias_por_barrio": "Grafías por barrio (promedio)", "fuente": ""},
+        template=_PLANTILLA,
+    )
+    figura.update_layout(title=titulo)
+    return figura
+
+
+def resumen_duplicados(calidad: pd.DataFrame) -> dict[str, int] | None:
+    """Registros, duplicados exactos y parejas entre inmobiliarias (de la fila global)."""
+    total = calidad[calidad["fuente"] == GLOBAL]
+    if total.empty:
+        return None
+    fila = total.iloc[0]
+    return {
+        c: int(fila[c])
+        for c in (
+            "registros",
+            "duplicados_exactos",
+            "parejas",
+            "parejas_ambiguas",
+            "parejas_media_o_mayor",
+            "parejas_dif_20",
+        )
+    }
+
+
+def tabla_calidad_pipeline(calidad: pd.DataFrame) -> pd.DataFrame:
+    """Todas las medidas de calidad, una fila por inmobiliaria y la global al final."""
+    if calidad.empty:
+        return pd.DataFrame()
+    columnas = {
+        "fuente": "Inmobiliaria",
+        "registros": "Registros",
+        "duplicados_exactos": "Duplicados exactos",
+        "sin_precio_pct": "Sin precio (%)",
+        "sin_area_pct": "Sin área (%)",
+        "sin_estrato_pct": "Sin estrato (%)",
+        "sin_barrio_oficial_pct": "Sin barrio oficial (%)",
+        "atipicos": "Atípicos",
+        "atipicos_pct": "Atípicos (%)",
+        "coords_descartadas_pct": "Coordenadas descartadas (%)",
+        "comparables_ubicacion": "Comparables nombre-coordenadas",
+        "desacuerdo_barrio": "Otro barrio",
+        "desacuerdo_comuna": "Otra comuna",
+        "grafias_por_barrio": "Grafías por barrio",
+    }
+    return calidad[list(columnas)].rename(columns=columnas).reset_index(drop=True)

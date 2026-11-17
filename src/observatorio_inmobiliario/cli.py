@@ -408,7 +408,8 @@ def _agregados(limpio: Path, compartidos: Path, salida: Path) -> int:
         )
         return 1
 
-    base = agregados.base_analisis(leer_limpio(limpio, semana))
+    del_periodo = leer_limpio(limpio, semana)
+    base = agregados.base_analisis(del_periodo)
     parejas, grupos = leer_compartidos(compartidos, semana)
     historico = leer_limpio(limpio)
     tablas = {
@@ -421,6 +422,7 @@ def _agregados(limpio: Path, compartidos: Path, salida: Path) -> int:
         "calidad_inmobiliaria": agregados.calidad_inmobiliaria(base, semana),
         "desvio_precio": agregados.desvio_precio(base, semana),
         "cobertura_estrato": agregados.cobertura_estrato(base, semana),
+        "calidad_pipeline": agregados.calidad_pipeline(del_periodo, parejas, semana),
         "compartidas_inmobiliaria": agregados.compartidas_inmobiliaria(
             parejas, grupos, base, semana
         ),

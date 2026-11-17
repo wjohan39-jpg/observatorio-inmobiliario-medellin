@@ -9,10 +9,12 @@ local con un apartamento no dice nada del precio de un barrio. Venta y arriendo 
 por separado.
 """
 
-from typing import Final
+from typing import Any, Final
 
 import pandas as pd
 from pandas.core.groupby import DataFrameGroupBy
+
+from observatorio_inmobiliario.normalizacion import normalizar_texto
 
 MINIMO_PUBLICACION: Final = 5
 """Anuncios que debe resumir una fila con precios para publicarse. Con menos, una mediana es
@@ -1214,3 +1216,207 @@ def cobertura_estrato(base: pd.DataFrame, semana: str) -> pd.DataFrame:
         tabla[columna] = tabla[columna].astype("Int64")
     orden = tabla.sort_values(["nivel", "codigo", "operacion", "estrato"], kind="stable")
     return orden[COLUMNAS_COBERTURA_ESTRATO].reset_index(drop=True)
+
+
+# ------------------------------------------------------- Calidad del pipeline
+
+UMBRAL_PAREJA_DIFERENTE: Final = 20.0
+"""Una pareja de confianza media o mayor con más de 20 % de diferencia de precio se cuenta como
+sospechosa: o es otro inmueble, o un precio desactualizado."""
+
+COLUMNAS_CALIDAD_PIPELINE: Final = [
+    "semana",
+    "fuente",
+    "registros",
+    "duplicados_exactos",
+    "sin_precio_pct",
+    "sin_area_pct",
+    "sin_estrato_pct",
+    "sin_barrio_declarado_pct",
+    "sin_barrio_oficial_pct",
+    "atipicos",
+    "atipicos_pct",
+    "atipico_precio",
+    "atipico_area",
+    "atipico_m2",
+    "coords_crudas",
+    "coords_descartadas_pct",
+    "ub_coordenadas_pct",
+    "ub_alias_pct",
+    "ub_nombre_pct",
+    "ub_sin_resolver_pct",
+    "comparables_ubicacion",
+    "desacuerdo_barrio",
+    "desacuerdo_comuna",
+    "grafias_por_barrio",
+    "parejas",
+    "parejas_ambiguas",
+    "parejas_media_o_mayor",
+    "parejas_dif_20",
+]
+_TEXTO_CALIDAD_PIPELINE: Final = COLUMNAS_CALIDAD_PIPELINE[:2]
+_ENTEROS_CALIDAD_PIPELINE: Final = (
+    "registros",
+    "duplicados_exactos",
+    "atipicos",
+    "atipico_precio",
+    "atipico_area",
+    "atipico_m2",
+    "coords_crudas",
+    "comparables_ubicacion",
+    "desacuerdo_barrio",
+    "desacuerdo_comuna",
+    "parejas",
+    "parejas_ambiguas",
+    "parejas_media_o_mayor",
+    "parejas_dif_20",
+)
+
+
+def _vacia_calidad_pipeline() -> pd.DataFrame:
+    tabla = _vacia(COLUMNAS_CALIDAD_PIPELINE, _TEXTO_CALIDAD_PIPELINE)
+    flotantes = [
+        c for c in COLUMNAS_CALIDAD_PIPELINE if c.endswith("_pct") or c == "grafias_por_barrio"
+    ]
+    return tabla.astype({c: "float64" for c in flotantes})
+
+
+def _pct(mascara: pd.Series, total: int) -> float:
+    return round(float(mascara.sum()) / total * 100, 1) if total else float("nan")
+
+
+def _barrio_declarado(unicos: pd.DataFrame, catalogo: Any) -> pd.DataFrame:
+    """Para los anuncios ubicados por coordenadas, ¿el barrio que declaran es el mismo?
+
+    Solo se compara cuando el nombre declarado se puede resolver a un barrio oficial. Devuelve
+    columnas ``comparable``, ``dif_barrio`` y ``dif_comuna``.
+    """
+    candidatos = unicos["metodo_ubicacion"].eq("coordenadas").fillna(False).astype(bool) & (
+        unicos["barrio"].notna()
+    )
+    nombres = {
+        nombre: catalogo.por_nombre(nombre) for nombre in unicos.loc[candidatos, "barrio"].unique()
+    }
+    declarado = unicos["barrio"].map(nombres)
+    codigo = declarado.map(lambda u: None if u is None or pd.isna(u) else u.codigo_barrio)
+    comuna = declarado.map(lambda u: None if u is None or pd.isna(u) else u.comuna)
+    comparable = candidatos & codigo.notna()
+    return pd.DataFrame(
+        {
+            "comparable": comparable,
+            "dif_barrio": comparable & (codigo != unicos["codigo_barrio"]),
+            "dif_comuna": comparable & (comuna != unicos["comuna"]),
+        },
+        index=unicos.index,
+    )
+
+
+def _grafias_por_barrio(unicos: pd.DataFrame) -> float:
+    """Promedio de grafías distintas (sin tildes ni mayúsculas) con que se nombra un barrio."""
+    nombrados = unicos[unicos["barrio"].notna() & unicos["codigo_barrio"].notna()]
+    if nombrados.empty:
+        return float("nan")
+    grafias = nombrados["barrio"].map(lambda b: normalizar_texto(str(b)))
+    return round(float(grafias.groupby(nombrados["codigo_barrio"]).nunique().mean()), 2)
+
+
+def _fila_calidad(unicos: pd.DataFrame, brutos: int, comparacion: pd.DataFrame) -> dict[str, Any]:
+    n = len(unicos)
+    motivo = unicos["motivo_atipico"].astype("string").fillna("")
+    atipico = unicos["es_atipico"].fillna(False).astype(bool)
+    crudas = unicos["latitud"].notna()
+    metodo = unicos["metodo_ubicacion"]
+    return {
+        "registros": n,
+        "duplicados_exactos": brutos - n,
+        "sin_precio_pct": _pct(unicos["precio"].isna(), n),
+        "sin_area_pct": _pct(unicos["area_m2"].isna(), n),
+        "sin_estrato_pct": _pct(unicos["estrato"].isna(), n),
+        "sin_barrio_declarado_pct": _pct(unicos["barrio"].isna(), n),
+        "sin_barrio_oficial_pct": _pct(unicos["codigo_barrio"].isna(), n),
+        "atipicos": int(atipico.sum()),
+        "atipicos_pct": _pct(atipico, n),
+        "atipico_precio": int(motivo.str.contains("precio_fuera_de_rango").sum()),
+        "atipico_area": int(motivo.str.contains("area_fuera_de_rango").sum()),
+        "atipico_m2": int(motivo.str.contains("precio_m2_extremo").sum()),
+        "coords_crudas": int(crudas.sum()),
+        "coords_descartadas_pct": _pct(
+            crudas & ~unicos["coordenadas_validas"].fillna(False).astype(bool), int(crudas.sum())
+        ),
+        "ub_coordenadas_pct": _pct(metodo.eq("coordenadas").fillna(False).astype(bool), n),
+        "ub_alias_pct": _pct(metodo.eq("alias").fillna(False).astype(bool), n),
+        "ub_nombre_pct": _pct(metodo.eq("nombre").fillna(False).astype(bool), n),
+        "ub_sin_resolver_pct": _pct(metodo.isna(), n),
+        "comparables_ubicacion": int(comparacion["comparable"].sum()),
+        "desacuerdo_barrio": int(comparacion["dif_barrio"].sum()),
+        "desacuerdo_comuna": int(comparacion["dif_comuna"].sum()),
+        "grafias_por_barrio": _grafias_por_barrio(unicos),
+    }
+
+
+def calidad_pipeline(
+    limpio: pd.DataFrame, parejas: pd.DataFrame, semana: str, catalogo: Any = None
+) -> pd.DataFrame:
+    """Qué tan buenos son los datos de cada inmobiliaria y de la limpieza (calidad de datos).
+
+    Una fila por inmobiliaria con :data:`MINIMO_PUBLICACION` registros o más, y otra con
+    ``fuente = "todas"``. Se calcula sobre **todos** los anuncios únicos de la semana, también
+    los de otros municipios y los atípicos, no solo la base de análisis. Mide:
+
+    * faltantes: % sin precio, área, estrato y barrio (declarado y oficial);
+    * atípicos, con su motivo, y duplicados exactos (misma clave repetida);
+    * ubicación: % de coordenadas crudas descartadas y cómo se resolvió el barrio;
+    * consistencia: de los anuncios ubicados por coordenadas cuyo barrio declarado se puede
+      resolver, cuántos no coinciden en barrio y en comuna; y cuántas grafías distintas tiene
+      cada barrio oficial;
+    * en la fila global, las parejas entre inmobiliarias, las ambiguas y las sospechosas.
+
+    ``catalogo`` es el catálogo de barrios; si es ``None`` se carga solo cuando hace falta.
+    """
+    if limpio.empty:
+        return _vacia_calidad_pipeline()
+    unicos = anuncios_unicos(limpio)
+    if catalogo is None:
+        from observatorio_inmobiliario.catalogo import Catalogo
+
+        catalogo = Catalogo.cargar()
+    comparacion = _barrio_declarado(unicos, catalogo)
+    brutos = limpio.groupby("fuente").size()
+
+    filas = []
+    for fuente, grupo in unicos.groupby("fuente"):
+        if len(grupo) >= MINIMO_PUBLICACION:
+            filas.append(
+                {
+                    "fuente": fuente,
+                    **_fila_calidad(grupo, int(brutos[fuente]), comparacion.loc[grupo.index]),
+                }
+            )
+    if not filas:
+        return _vacia_calidad_pipeline()
+    total = {"fuente": GLOBAL, **_fila_calidad(unicos, len(limpio), comparacion)}
+    fuertes = parejas["confianza"].isin(["alta", "media"])
+    total.update(
+        parejas=len(parejas),
+        parejas_ambiguas=int(parejas["ambigua"].fillna(False).astype(bool).sum()),
+        parejas_media_o_mayor=int(fuertes.sum()),
+        parejas_dif_20=int(
+            (
+                fuertes
+                & (parejas["diferencia_precio_pct"].astype("float64") > UMBRAL_PAREJA_DIFERENTE)
+            ).sum()
+        ),
+    )
+    tabla = pd.DataFrame([*filas, total]).assign(semana=semana)
+    for columna in COLUMNAS_CALIDAD_PIPELINE:
+        if columna not in tabla:
+            tabla[columna] = pd.NA
+    tabla = tabla.astype({c: "string" for c in _TEXTO_CALIDAD_PIPELINE})
+    for columna in _ENTEROS_CALIDAD_PIPELINE:
+        tabla[columna] = tabla[columna].astype("Int64")
+    for columna in COLUMNAS_CALIDAD_PIPELINE:
+        if columna.endswith("_pct") or columna == "grafias_por_barrio":
+            tabla[columna] = tabla[columna].astype("float64")
+    tabla["orden"] = tabla["fuente"].eq(GLOBAL)
+    tabla = tabla.sort_values(["orden", "fuente"], kind="stable")
+    return tabla[COLUMNAS_CALIDAD_PIPELINE].reset_index(drop=True)

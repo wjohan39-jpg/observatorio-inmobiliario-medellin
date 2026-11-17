@@ -6,17 +6,89 @@
 ![Licencia](https://img.shields.io/badge/licencia-MIT-green)
 [![Dashboard](https://img.shields.io/badge/dashboard-en%20vivo-2c7fb8)](https://wjohan39-jpg.github.io/observatorio-inmobiliario-medellin/)
 
-Proyecto de análisis de datos de punta a punta: **extrae** anuncios de inmobiliarias de Medellín, los **valida y limpia**, los **guarda** con histórico semanal y los **analiza** en un dashboard web.
+Proyecto de análisis de datos de punta a punta: **extrae** anuncios de 9 inmobiliarias de Medellín, los **valida y limpia**, los **empareja** entre inmobiliarias, los **guarda** con histórico semanal y los **analiza** en un dashboard web con mapas y estadística espacial.
 
 > **Estado:** completo y funcionando. Se actualiza solo cada lunes (ver [Automatización](#automatización)). La [hoja de ruta](docs/superpowers/plans/2026-11-10-hoja-de-ruta.md) tiene el detalle de cómo se construyó.
 
+![Mapa del precio por m² de vivienda en venta, por barrio](docs/img/sitio-inicio.png)
+
+## Tres hallazgos
+
+Con los datos de la semana **2026-S46**, la última corrida completa: 9 inmobiliarias y 10.763 anuncios únicos, de los que 7.085 son de Medellín y no son atípicos. Cada hallazgo dice qué decisión ayuda a tomar y qué **no** prueba. Las cifras cambian con cada corrida semanal; el [notebook](notebooks/01_analisis_exploratorio.ipynb) y el dashboard las recalculan.
+
+### 1. Los precios tienen geografía: los barrios caros están juntos
+
+El índice de Moran del precio por m² es **0,46 (p = 0,001, el mínimo posible con 999 permutaciones)** tanto en venta (102 barrios) como en arriendo (115): los barrios con precios parecidos están pegados, no repartidos al azar. En venta, los cuatro clústeres alto-alto son de El Poblado (La Florida, Alejandría, Castropol y El Tesoro). En arriendo, 15 de los 17 también son de la comuna 14.
+
+![Clústeres espaciales del precio por m² en venta](docs/img/sitio-geografia.png)
+
+- **Decisión que ayuda a tomar:** para valorar o comparar un inmueble no basta el precio de su barrio; hay que mirar también a los vecinos. Quien busca comprar puede revisar los barrios *bajo-alto* (Santa Fe y El Rincón en venta): más baratos que su entorno, que es caro.
+- **No prueba:** que el vecindario cause el precio, ni que un barrio bajo-alto sea una oportunidad. No se conoce el estado de los inmuebles, y los clústeres locales no se corrigen por comparaciones múltiples.
+
+### 2. Medellín no es monocéntrica: el precio no baja al alejarse del centro histórico
+
+La correlación de Spearman entre la distancia a cada centro y el precio por m² de los barrios:
+
+| Centro de referencia | Venta | Arriendo |
+|---|---|---|
+| Centro histórico (Parque Berrío) | +0,20 | +0,29 |
+| El Poblado (Parque Lleras) | −0,36 | −0,41 |
+| Laureles (Primer Parque) | −0,32 | +0,03 |
+
+Alejarse de El Poblado sí abarata; alejarse del centro histórico no (si algo, encarece).
+
+- **Decisión que ayuda a tomar:** un modelo de precios o una búsqueda de vivienda no debe usar la «distancia al centro» como sustituto del valor. Hay que medir contra varios centros, sobre todo El Poblado.
+- **No prueba:** un efecto. La distancia se mezcla con el estrato y la zona, y los puntos de referencia son aproximados. No se midió la cercanía a vías, metro o parques porque el proyecto no tiene esos datos.
+
+### 3. El inventario está repartido entre varias inmobiliarias y casi no se repite
+
+Santa Fe, Maxibienes y Alnago suman el **58 %** del inventario observado (21,7 %, 18,7 % y 17,5 %), y el índice HHI de la ciudad es 1.493, en el límite entre poco y moderadamente concentrado. Solo el **5,6 %** de los anuncios (181 inmuebles) aparece en más de una inmobiliaria con confianza media o mayor, y el 2,5 % (84 inmuebles) con confianza alta. Cuando un inmueble sí se repite con confianza alta, la diferencia de precio mediana entre inmobiliarias es de solo 2 %.
+
+![Cuota de inventario por inmobiliaria](docs/img/sitio-cuota.png)
+
+- **Decisión que ayuda a tomar:** quien compra o arrienda no puede confiar en una sola inmobiliaria, porque la mayor cubre apenas un 22 %: conviene consultar varias. Para una inmobiliaria, el mapa de cuotas por barrio muestra dónde compite y dónde es la única. Para un análisis, contar el inventario sin quitar duplicados lo sobrestima.
+- **No prueba:** la cuota del mercado. Son 9 inmobiliarias; faltan otras y los particulares. Los 5,6 % son probablemente un mínimo, porque para emparejar se exigen comuna, tipo, área, alcobas y baños iguales.
+
 ## Preguntas que responde
 
-- ¿Cuánto cuesta el m² en cada barrio de Medellín?
-- ¿Qué inmobiliarias cubren más barrios y en qué estratos trabajan?
-- ¿Cuáles manejan las ventas y los arriendos más económicos?
-- ¿Qué inmobiliarias publican el mismo inmueble y con qué diferencia de precio?
-- ¿Cómo evolucionan los precios semana a semana?
+Cada grupo corresponde a una página del [dashboard](#dashboard).
+
+**Precios y mercado** (*Barrios*, *Análisis de precios*)
+- ¿Cuánto cuesta el m² por barrio, comuna y estrato, y cuáles son los más caros y más baratos?
+- ¿Qué tan dispersos están los precios dentro de cada barrio, y cuándo engaña el promedio?
+- ¿Cuánto cambia el precio según el tipo de inmueble, el área y la operación?
+- ¿Cuál es la rentabilidad bruta por barrio y dónde favorece comprar o arrendar?
+
+**Oferta y rotación** (*Oferta y rotación*, *Evolución*)
+- ¿Cuántos inmuebles activos hay por barrio, tipo y operación?
+- ¿Cómo se distribuye la oferta por rango de precio y número de alcobas?
+- ¿Cuántos anuncios nuevos y retirados hay cada semana y cómo evolucionan los precios?
+
+**Inmobiliarias** (*Cuota y perfil*, *Inmobiliarias*)
+- ¿Qué cuota del inventario tiene cada inmobiliaria, en total y por barrio, y qué tan concentrado está (HHI)?
+- ¿En qué tipo de inmueble, operación y estrato se especializa cada una?
+- ¿Cuáles cobran más o menos que el resto en su mismo barrio y tipo?
+
+**Propiedades compartidas** (*Propiedades compartidas*)
+- ¿Cuántos inmuebles publican varias inmobiliarias, con qué diferencia de precio, y cuáles comparten más inventario entre sí?
+
+**Calidad de los datos** (*Calidad de los datos*)
+- ¿Qué % de los datos falta, cuántos precios o áreas son atípicos o erróneos, qué tan consistente es la ubicación (nombre frente a coordenadas) y cuántos duplicados hay, por inmobiliaria?
+
+**Oportunidades y nichos** (*Oportunidades y nichos*)
+- ¿Qué barrios y estratos tienen poca cobertura de inmobiliarias, y qué parte de los anuncios está muy por debajo o por encima del precio de su barrio?
+
+**Geografía** (*Geografía*)
+- ¿Hay clústeres espaciales de precios altos o bajos (Moran)? ¿Cómo cambia el precio al alejarse de los centros? ¿Cómo se compara El Poblado, Laureles y los municipios vecinos?
+
+## Limitaciones y qué haría con más tiempo
+
+- **Alcance:** son 9 inmobiliarias y, por ahora, una sola semana completa; no hay tendencias. Una corrida puede salir parcial (la de 2026-S47 trajo 7 de las 9), por eso las cifras de este README son de 2026-S46.
+- **Ubicación:** solo ~50 % de los anuncios tiene coordenadas y por tanto barrio oficial; los análisis por barrio subrepresentan a las inmobiliarias que no las publican.
+- **Variables que no hay:** estado, antigüedad, piso y fotos. Un precio bajo para su barrio **no prueba una ganga**: cerca de 1 de cada 5 anuncios cae por cada lado del ±20 % solo por la dispersión normal.
+- **Duplicados:** no se mide la repetición con pequeñas variaciones dentro de una misma inmobiliaria, y el emparejamiento entre inmobiliarias no tiene una auditoría manual que mida su precisión.
+
+Con más tiempo: acumular semanas para medir **días en el mercado**, bajadas de precio y publicaciones «zombi»; traer datos de OpenStreetMap para estimar el efecto de metro, parques y vías; reemplazar la comparación con la mediana del barrio por una **regresión hedónica** (precio frente a área, estrato, alcobas y zona); revisar a mano unas 50 parejas del emparejamiento; y publicar la app de Streamlit.
 
 ## Uso
 
@@ -183,7 +255,7 @@ Resume la última semana limpia y todo el histórico en `data/agregados/`. **Son
 
 **Evolución:** la rotación se mide por inmobiliaria. Cada una se compara con su propia semana anterior con datos, así un scraping que falló, o una fuente que se agregó tarde, no parece un retiro masivo ni un inventario nuevo. La duración publicada excluye los anuncios que ya estaban en la primera semana de su inmobiliaria, porque no se sabe cuándo empezaron. Con una sola semana (2026-S46), estas tablas todavía no muestran retiros ni cambios.
 
-## Hallazgos
+## Más hallazgos del notebook
 
 Del [notebook de análisis exploratorio](notebooks/01_analisis_exploratorio.ipynb), con los datos de la semana 2026-S46 (vivienda en Medellín):
 
@@ -205,11 +277,13 @@ uv run --group analisis jupyter nbconvert --to notebook --execute --inplace note
 
 **En vivo:** https://wjohan39-jpg.github.io/observatorio-inmobiliario-medellin/
 
-![Resumen del mercado: indicadores y mapa del precio por m² por barrio](docs/img/sitio-inicio.png)
-
-| Barrios más baratos y más caros | Cobertura de cada inmobiliaria |
+| Barrios más baratos y más caros | Clústeres espaciales (Moran local) |
 |---|---|
-| ![Venta: los barrios más baratos y más caros por m²](docs/img/sitio-barrios.png) | ![Barrios cubiertos por inmobiliaria y dónde se concentra cada una](docs/img/sitio-inmobiliarias.png) |
+| ![Venta: los barrios más baratos y más caros por m²](docs/img/sitio-barrios.png) | ![Clústeres espaciales del precio por m² en venta](docs/img/sitio-geografia.png) |
+| **Cuota de inventario por inmobiliaria** | **Barrios con poca cobertura** |
+| ![Cuota del inventario de cada inmobiliaria](docs/img/sitio-cuota.png) | ![Inmobiliarias con anuncios de venta en cada barrio](docs/img/sitio-nichos.png) |
+
+![Completitud de los datos de vivienda por inmobiliaria](docs/img/sitio-calidad.png)
 
 El dashboard tiene dos versiones con la misma información. Las dos leen solo `data/agregados/`, así que nunca muestran ids, enlaces ni coordenadas de anuncios.
 

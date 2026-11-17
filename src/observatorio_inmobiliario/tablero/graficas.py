@@ -14,6 +14,15 @@ import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
 
+from observatorio_inmobiliario.agregados import (
+    ANALISIS_AREA,
+    ANALISIS_DISPERSION,
+    ANALISIS_ESTRATO,
+    ANALISIS_TIPO,
+    RANGOS_AREA,
+    TIPOS_COMPARADOS,
+)
+
 COLORES_FUENTE: Final = {
     "activourbano": "#1f77b4",
     "alnago": "#ff7f0e",
@@ -370,3 +379,303 @@ def tabla_grupos(grupos_compartidos: pd.DataFrame, nivel: str) -> pd.DataFrame:
             "diferencia": "Diferencia (%)",
         }
     )
+
+
+# ------------------------------------------------------------ Análisis de precios
+
+UMBRAL_DISPERSION: Final = 40
+"""Variación (%) desde la que un barrio se marca como disperso. Es orientativo: con más de
+40 % la desviación estándar es casi la mitad de la media y el promedio deja de describir al
+barrio."""
+LECTURAS: Final = ("Favorece arrendar", "Intermedio", "Favorece comprar")
+_COLUMNAS_NUMERICAS_MERCADO: Final = (
+    "anuncios",
+    "precio_m2_media",
+    "precio_m2_mediana",
+    "precio_m2_p25",
+    "precio_m2_p75",
+    "variacion_pct",
+)
+_COLUMNAS_ENTERAS_DISPERSION: Final = (
+    "Anuncios",
+    "Mediana (m²)",
+    "Media (m²)",
+    "Cuartil 25 (m²)",
+    "Cuartil 75 (m²)",
+    "Variación (%)",
+)
+
+
+def _mercado(mercado: pd.DataFrame, analisis: str, operacion: str) -> pd.DataFrame:
+    """Las filas de un análisis y una operación, con las estadísticas como float."""
+    filas = mercado[
+        (mercado["analisis"] == analisis)
+        & (mercado["operacion"] == operacion)
+        & mercado["precio_m2_mediana"].notna()
+    ]
+    return filas.assign(
+        **{
+            c: filas[c].astype("Float64").to_numpy(dtype="float64", na_value=float("nan"))
+            for c in _COLUMNAS_NUMERICAS_MERCADO
+        }
+    )
+
+
+def dispersion_barrios(mercado: pd.DataFrame, operacion: str) -> go.Figure:
+    """Precio por m² de cada barrio frente a su variación: arriba, el promedio engaña."""
+    titulo = f"{operacion.title()}: ¿qué tan parejo es el precio dentro de cada barrio?"
+    datos = _mercado(mercado, ANALISIS_DISPERSION, operacion)
+    if datos.empty:
+        return _sin_datos(titulo)
+    figura = px.scatter(
+        datos,
+        x="precio_m2_mediana",
+        y="variacion_pct",
+        size="anuncios",
+        hover_name="nombre",
+        hover_data={
+            "precio_m2_mediana": ":,.0f",
+            "precio_m2_media": ":,.0f",
+            "variacion_pct": ":.0f",
+            "anuncios": True,
+        },
+        labels={
+            "precio_m2_mediana": "Mediana, COP por m²",
+            "precio_m2_media": "Media, COP por m²",
+            "variacion_pct": "Variación (%)",
+            "anuncios": "Anuncios",
+        },
+        template=_PLANTILLA,
+    )
+    figura.add_hline(
+        y=UMBRAL_DISPERSION,
+        line_dash="dot",
+        annotation_text=f"Más de {UMBRAL_DISPERSION} %: el promedio engaña",
+        annotation_position="top left",
+    )
+    figura.update_layout(title=titulo)
+    return figura
+
+
+def tabla_dispersion(mercado: pd.DataFrame, operacion: str) -> pd.DataFrame:
+    """Los barrios del más al menos disperso, con la media y la mediana lado a lado."""
+    datos = _mercado(mercado, ANALISIS_DISPERSION, operacion)
+    if datos.empty:
+        return pd.DataFrame()
+    tabla = datos.sort_values("variacion_pct", ascending=False)[
+        [
+            "nombre",
+            "comuna",
+            "anuncios",
+            "precio_m2_mediana",
+            "precio_m2_media",
+            "precio_m2_p25",
+            "precio_m2_p75",
+            "variacion_pct",
+        ]
+    ].rename(
+        columns={
+            "nombre": "Barrio",
+            "comuna": "Comuna",
+            "anuncios": "Anuncios",
+            "precio_m2_mediana": "Mediana (m²)",
+            "precio_m2_media": "Media (m²)",
+            "precio_m2_p25": "Cuartil 25 (m²)",
+            "precio_m2_p75": "Cuartil 75 (m²)",
+            "variacion_pct": "Variación (%)",
+        }
+    )
+    return tabla.round(0).astype({c: "int64" for c in _COLUMNAS_ENTERAS_DISPERSION})
+
+
+def _barras(datos: pd.DataFrame, titulo: str, orden: list[str], etiqueta: str) -> go.Figure:
+    """Barras de la mediana por categoría, con el rango entre los cuartiles 25 y 75."""
+    figura = px.bar(
+        datos.assign(
+            arriba=datos["precio_m2_p75"] - datos["precio_m2_mediana"],
+            abajo=datos["precio_m2_mediana"] - datos["precio_m2_p25"],
+        ),
+        x="categoria",
+        y="precio_m2_mediana",
+        error_y="arriba",
+        error_y_minus="abajo",
+        category_orders={"categoria": orden},
+        hover_data={"anuncios": True, "precio_m2_mediana": ":,.0f", "categoria": False},
+        labels={
+            "categoria": etiqueta,
+            "precio_m2_mediana": "COP por m² (mediana)",
+            "anuncios": "Anuncios",
+        },
+        template=_PLANTILLA,
+    )
+    figura.update_layout(title=titulo)
+    return figura
+
+
+def rangos_area(mercado: pd.DataFrame, operacion: str) -> go.Figure:
+    """Mediana del m² de vivienda por rango de área; las barras de error van de Q25 a Q75."""
+    titulo = f"Vivienda en {operacion}: precio por m² según el área"
+    datos = _mercado(mercado, ANALISIS_AREA, operacion)
+    if datos.empty:
+        return _sin_datos(titulo)
+    return _barras(datos, titulo, list(RANGOS_AREA), "Área (m²)")
+
+
+def precio_estratos(mercado: pd.DataFrame, operacion: str) -> go.Figure:
+    """Mediana del m² de vivienda por estrato declarado; las barras de error van de Q25 a Q75."""
+    titulo = f"Vivienda en {operacion}: precio por m² según el estrato"
+    datos = _mercado(mercado, ANALISIS_ESTRATO, operacion)
+    if datos.empty:
+        return _sin_datos(titulo)
+    orden = sorted(datos["categoria"].astype(str).unique())
+    return _barras(datos, titulo, orden, "Estrato (solo anuncios que lo declaran)")
+
+
+def tipos_por_comuna(mercado: pd.DataFrame, operacion: str) -> go.Figure:
+    """Mediana del m² por tipo de inmueble en cada comuna (con 5 anuncios o más por celda)."""
+    titulo = f"{operacion.title()}: precio por m² según el tipo de inmueble, por comuna"
+    datos = _mercado(mercado, ANALISIS_TIPO, operacion)
+    if datos.empty:
+        return _sin_datos(titulo)
+    datos = datos.assign(nombre=datos["nombre"].astype(str).str.title())
+    figura = px.bar(
+        datos.sort_values("nombre"),
+        x="nombre",
+        y="precio_m2_mediana",
+        color="categoria",
+        barmode="group",
+        category_orders={"categoria": list(TIPOS_COMPARADOS)},
+        hover_data={"anuncios": True, "precio_m2_mediana": ":,.0f"},
+        labels={
+            "nombre": "Comuna",
+            "precio_m2_mediana": "COP por m² (mediana)",
+            "categoria": "Tipo",
+            "anuncios": "Anuncios",
+        },
+        template=_PLANTILLA,
+    )
+    figura.update_layout(title=titulo, xaxis_tickangle=-45)
+    return figura
+
+
+def precio_comunas(precios: pd.DataFrame, operacion: str) -> go.Figure:
+    """Mediana del m² de vivienda en cada comuna, de la más barata a la más cara."""
+    titulo = f"{operacion.title()}: precio por m² de vivienda en cada comuna (mediana)"
+    comunas = precios[
+        (precios["nivel"] == "comuna")
+        & (precios["operacion"] == operacion)
+        & (precios["tipo"] == VIVIENDA)
+        & precios["precio_m2_mediana"].notna()
+    ]
+    if comunas.empty:
+        return _sin_datos(titulo)
+    orden = comunas.assign(
+        precio_m2_mediana=comunas["precio_m2_mediana"].astype("float64"),
+        nombre=comunas["nombre"].astype(str).str.title(),
+    ).sort_values("precio_m2_mediana")
+    figura = px.bar(
+        orden,
+        x="precio_m2_mediana",
+        y="nombre",
+        orientation="h",
+        hover_data={"anuncios": True, "precio_m2_mediana": ":,.0f"},
+        labels={
+            "precio_m2_mediana": "COP por m² (mediana)",
+            "nombre": "Comuna",
+            "anuncios": "Anuncios",
+        },
+        template=_PLANTILLA,
+    )
+    figura.update_layout(title=titulo, height=max(400, 24 * len(orden)))
+    return figura
+
+
+def _lectura(rentabilidad: float, bajo: float, alto: float) -> str:
+    if rentabilidad >= alto:
+        return LECTURAS[2]
+    return LECTURAS[0] if rentabilidad <= bajo else LECTURAS[1]
+
+
+def _rentabilidad(precios: pd.DataFrame) -> pd.DataFrame:
+    """Un barrio por fila con venta y arriendo del m², rentabilidad bruta anual y su lectura.
+
+    Solo entran los barrios con mediana de venta **y** de arriendo de vivienda (cada una con
+    5 anuncios o más). La lectura divide a los barrios en tres grupos iguales por rentabilidad.
+    """
+    vacia = pd.DataFrame(
+        columns=["nombre", "comuna", "venta", "arriendo", "rentabilidad", "anios", "lectura"]
+    )
+    barrios = precios[
+        (precios["nivel"] == "barrio")
+        & (precios["tipo"] == VIVIENDA)
+        & precios["precio_m2_mediana"].notna()
+    ]
+    if barrios.empty:
+        return vacia
+    medianas = barrios.pivot_table(
+        index="codigo", columns="operacion", values="precio_m2_mediana", aggfunc="first"
+    )
+    if not {"venta", "arriendo"} <= set(medianas.columns):
+        return vacia
+    tabla = medianas[["venta", "arriendo"]].astype("float64").dropna().rename_axis(columns=None)
+    if tabla.empty:
+        return vacia
+    nombres = barrios.drop_duplicates("codigo").set_index("codigo")
+    tabla["nombre"] = nombres["nombre"].reindex(tabla.index)
+    tabla["comuna"] = nombres["comuna"].reindex(tabla.index)
+    tabla["rentabilidad"] = tabla["arriendo"] * 12 / tabla["venta"] * 100
+    tabla["anios"] = 100 / tabla["rentabilidad"]
+    bajo, alto = tabla["rentabilidad"].quantile([1 / 3, 2 / 3])
+    tabla["lectura"] = tabla["rentabilidad"].map(lambda r: _lectura(r, bajo, alto))
+    return tabla.sort_values("rentabilidad", ascending=False)
+
+
+def rentabilidad_barrios(precios: pd.DataFrame, cuantos: int = 15) -> go.Figure:
+    """Los barrios donde comprar rinde más y donde rinde menos (rentabilidad bruta anual)."""
+    titulo = "Rentabilidad bruta anual por barrio: dónde favorece comprar y dónde arrendar"
+    tabla = _rentabilidad(precios)
+    if tabla.empty:
+        return _sin_datos(titulo)
+    mitad = min(cuantos, len(tabla) // 2) or len(tabla)
+    figura = go.Figure()
+    for nombre, filas, color in (
+        (LECTURAS[0], tabla.tail(mitad), "#2c7fb8"),
+        (LECTURAS[2], tabla.head(mitad), "#d95f0e"),
+    ):
+        figura.add_bar(
+            x=filas["rentabilidad"],
+            y=filas["nombre"],
+            orientation="h",
+            name=nombre,
+            marker_color=color,
+            customdata=filas[["anios"]],
+            hovertemplate="%{y}: %{x:.1f} % al año (%{customdata[0]:.0f} años de arriendo "
+            "para igualar la compra)<extra></extra>",
+        )
+    figura.update_layout(
+        title=titulo,
+        template=_PLANTILLA,
+        xaxis_title="Rentabilidad bruta anual (%)",
+        yaxis={"autorange": "reversed"},
+        height=max(400, 22 * 2 * mitad),
+    )
+    return figura
+
+
+def tabla_rentabilidad(precios: pd.DataFrame) -> pd.DataFrame:
+    """Todos los barrios con venta y arriendo, de mayor a menor rentabilidad bruta."""
+    tabla = _rentabilidad(precios)
+    if tabla.empty:
+        return pd.DataFrame()
+    columnas = {
+        "nombre": "Barrio",
+        "comuna": "Comuna",
+        "venta": "Venta (m²)",
+        "arriendo": "Arriendo (m²)",
+        "rentabilidad": "Rentabilidad bruta (%)",
+        "anios": "Años de arriendo = compra",
+        "lectura": "Lectura",
+    }
+    tabla = tabla.reset_index(drop=True)[list(columnas)].rename(columns=columnas)
+    tabla = tabla.astype({"Venta (m²)": "int64", "Arriendo (m²)": "int64"})
+    return tabla.round({"Rentabilidad bruta (%)": 1, "Años de arriendo = compra": 1})

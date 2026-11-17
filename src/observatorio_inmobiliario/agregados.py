@@ -483,3 +483,151 @@ def grupos_compartidos(grupos: pd.DataFrame, base: pd.DataFrame, semana: str) ->
         "precio": "Int64",
     }
     return _tipar(tabla, COLUMNAS_GRUPOS_COMPARTIDOS, tipos)
+
+
+# ------------------------------------------------------------ Análisis de precios
+
+TIPOS_COMPARADOS: Final = ("apartamento", "casa", "local", "oficina")
+"""Tipos que se comparan entre sí dentro de una comuna (pregunta 3)."""
+RANGOS_AREA: Final = ("Menos de 40", "40 a 70", "70 a 100", "100 a 150", "Más de 150")
+"""Rangos de área en m², de menor a mayor (pregunta 4)."""
+_LIMITES_AREA: Final = [0, 40, 70, 100, 150, float("inf")]
+ANALISIS_DISPERSION: Final = "dispersion"
+ANALISIS_TIPO: Final = "tipo"
+ANALISIS_AREA: Final = "area"
+ANALISIS_ESTRATO: Final = "estrato"
+CIUDAD: Final = "ciudad"
+"""Valor de ``codigo`` de las filas que resumen toda la ciudad."""
+
+COLUMNAS_MERCADO: Final = [
+    "semana",
+    "analisis",
+    "codigo",
+    "nombre",
+    "comuna",
+    "operacion",
+    "categoria",
+    "anuncios",
+    "precio_m2_media",
+    "precio_m2_mediana",
+    "precio_m2_p25",
+    "precio_m2_p75",
+    "variacion_pct",
+]
+_TEXTO_MERCADO: Final = COLUMNAS_MERCADO[:7]
+_CLAVES_MERCADO: Final = ["codigo", "nombre", "comuna", "operacion", "categoria"]
+
+
+def _como_mercado(
+    datos: pd.DataFrame,
+    analisis: str,
+    codigo: pd.Series,
+    nombre: pd.Series,
+    categoria: pd.Series,
+) -> pd.DataFrame:
+    """Deja ``datos`` con las columnas comunes de :data:`COLUMNAS_MERCADO` (sin estadísticas)."""
+    return pd.DataFrame(
+        {
+            "analisis": pd.Series(analisis, index=datos.index, dtype="string"),
+            "codigo": codigo.astype("string"),
+            "nombre": nombre.astype("string"),
+            "comuna": datos["comuna"].astype("string"),
+            "operacion": datos["operacion"].astype("string"),
+            "categoria": categoria.astype("string"),
+            "precio_m2": datos["precio_m2"].astype("Float64"),
+        }
+    )
+
+
+def _filas_mercado(base: pd.DataFrame) -> pd.DataFrame:
+    """Los anuncios con precio por m², listos para agrupar en las cuatro tablas de análisis."""
+    con_m2 = base[base["precio_m2"].notna()]
+    vivienda = con_vivienda(con_m2)
+    vivienda = vivienda[vivienda["tipo"] == VIVIENDA]
+    sin_comuna = pd.Series(pd.NA, index=vivienda.index, dtype="string")
+    ciudad = pd.Series(CIUDAD, index=vivienda.index, dtype="string")
+    todo_vivienda = pd.Series(VIVIENDA, index=vivienda.index, dtype="string")
+
+    en_barrio = vivienda[vivienda["codigo_barrio"].notna()]
+    dispersion = _como_mercado(
+        en_barrio,
+        ANALISIS_DISPERSION,
+        en_barrio["codigo_barrio"],
+        en_barrio["barrio_normalizado"],
+        todo_vivienda.loc[en_barrio.index],
+    )
+
+    comparados = con_m2[
+        con_m2["tipo_normalizado"].isin(TIPOS_COMPARADOS).fillna(False).astype(bool)
+        & con_m2["comuna"].notna()
+    ]
+    por_tipo = _como_mercado(
+        comparados,
+        ANALISIS_TIPO,
+        comparados["comuna"],
+        comparados["nombre_comuna"],
+        comparados["tipo_normalizado"],
+    )
+
+    con_area = vivienda[vivienda["area_m2"].notna()]
+    rangos = pd.cut(
+        con_area["area_m2"].astype("float64"),
+        _LIMITES_AREA,
+        labels=list(RANGOS_AREA),
+        right=False,
+    ).astype("string")
+    por_area = _como_mercado(
+        con_area.assign(comuna=sin_comuna.loc[con_area.index]),
+        ANALISIS_AREA,
+        ciudad.loc[con_area.index],
+        ciudad.loc[con_area.index],
+        rangos,
+    )
+
+    con_estrato = vivienda[vivienda["estrato"].notna()]
+    por_estrato = _como_mercado(
+        con_estrato.assign(comuna=sin_comuna.loc[con_estrato.index]),
+        ANALISIS_ESTRATO,
+        ciudad.loc[con_estrato.index],
+        ciudad.loc[con_estrato.index],
+        con_estrato["estrato"].astype("Int64"),
+    )
+    return pd.concat([dispersion, por_tipo, por_area, por_estrato], ignore_index=True)
+
+
+def mercado_precios(base: pd.DataFrame, semana: str) -> pd.DataFrame:
+    """Precio por m² con más detalle que :func:`precios_zona` (preguntas 1 a 4).
+
+    Una sola tabla en formato largo; ``analisis`` dice qué compara cada fila:
+
+    * ``"dispersion"``: vivienda por barrio, con la media y la variación (desviación estándar
+      sobre la media, en %). Si la variación es alta, la media engaña.
+    * ``"tipo"``: apartamento, casa, local y oficina por comuna.
+    * ``"area"``: vivienda de toda la ciudad por rango de área.
+    * ``"estrato"``: vivienda de toda la ciudad por estrato declarado.
+
+    Cada fila resume al menos :data:`MINIMO_PUBLICACION` anuncios **con precio por m²**.
+    """
+    filas = _filas_mercado(base)
+    if filas.empty:
+        return _vacia(COLUMNAS_MERCADO, _TEXTO_MERCADO)
+    grupos = filas.groupby(["analisis", *_CLAVES_MERCADO], observed=True, dropna=False)
+    valores = grupos["precio_m2"]
+    media = valores.mean()
+    tabla = pd.DataFrame(
+        {
+            "anuncios": valores.count(),
+            "precio_m2_media": media,
+            "precio_m2_mediana": valores.median(),
+            "precio_m2_p25": valores.quantile(0.25),
+            "precio_m2_p75": valores.quantile(0.75),
+            "variacion_pct": valores.std() / media * 100,
+        }
+    ).reset_index()
+    tabla = tabla[tabla["anuncios"] >= MINIMO_PUBLICACION].assign(semana=semana)
+    if tabla.empty:
+        return _vacia(COLUMNAS_MERCADO, _TEXTO_MERCADO)
+    tabla = _enteros(tabla, COLUMNAS_MERCADO[7:])
+    tabla = tabla.astype({c: "string" for c in _TEXTO_MERCADO})
+    orden = tabla.sort_values(["analisis", "codigo", "operacion", "categoria"], kind="stable")
+    return orden[COLUMNAS_MERCADO].reset_index(drop=True)

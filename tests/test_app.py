@@ -77,6 +77,7 @@ def test_inmobiliarias_con_reputacion_falsa(monkeypatch: pytest.MonkeyPatch) -> 
 # ------------------------------------------------------------------ Tarea 4
 
 PAGINAS_2 = [
+    "pages/7_Análisis_de_precios.py",
     "pages/4_Propiedades_compartidas.py",
     "pages/5_Evolución.py",
     "pages/6_Metodología.py",
@@ -87,6 +88,24 @@ PAGINAS_2 = [
 def test_pagina_2_corre_sin_errores(pagina: str) -> None:
     app = _correr(pagina)
     assert app.title
+
+
+def test_precios_cambia_operacion_y_lectura() -> None:
+    app = _correr("pages/7_Análisis_de_precios.py")
+    app.radio(key="operacion_precios").set_value("arriendo").run()
+    assert not app.exception
+    app.selectbox(key="lectura_precios").set_value("Favorece comprar").run()
+    assert not app.exception
+    tabla = app.dataframe[-1].value
+    assert set(tabla["Lectura"]) == {"Favorece comprar"}
+
+
+def test_precios_sin_columnas_privadas() -> None:
+    app = _correr("pages/7_Análisis_de_precios.py")
+    assert app.dataframe
+    for tabla in app.dataframe:
+        columnas = {str(c).lower() for c in tabla.value.columns}
+        assert not columnas & {"id_fuente", "url", "latitud", "longitud"}
 
 
 def test_compartidos_sin_columnas_privadas() -> None:

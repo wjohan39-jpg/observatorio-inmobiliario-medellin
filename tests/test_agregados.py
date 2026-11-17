@@ -17,11 +17,27 @@ from observatorio_inmobiliario.agregados import (
     estratos_inmobiliaria,
     grupos_compartidos,
     indice_relativo,
+    mercado_precios,
     precios_zona,
 )
 from observatorio_inmobiliario.emparejamiento import Confianza, agrupar, emparejar
 
 SEMANA = "2026-S46"
+COLUMNAS_MERCADO = [
+    "semana",
+    "analisis",
+    "codigo",
+    "nombre",
+    "comuna",
+    "operacion",
+    "categoria",
+    "anuncios",
+    "precio_m2_media",
+    "precio_m2_mediana",
+    "precio_m2_p25",
+    "precio_m2_p75",
+    "variacion_pct",
+]
 COLUMNAS_PRECIOS_ZONA = [
     "semana",
     "nivel",
@@ -559,3 +575,144 @@ def test_economia_minimo_por_estadistica(limpio: Any) -> None:
     assert vivienda["anuncios"] == 5
     assert vivienda["precio_mediana"] == 4_000_000
     assert pd.isna(vivienda["precio_m2_mediana"])
+
+
+# ------------------------------------------------------- Análisis de precios
+
+
+def _m2(*valores: float | None, **cambios: Any) -> list[dict[str, Any]]:
+    """Anuncios de arriendo con ese precio por m² (``None`` = sin dato) y 100 m² de área."""
+    return [
+        fila(
+            id_fuente=f"m-{cambios.get('tipo_normalizado', 'a')}-{cambios.get('area_m2')}-{i}",
+            precio=None if v is None else int(v * 100),
+            precio_m2=v,
+            **{"area_m2": 100.0, **cambios},
+        )
+        for i, v in enumerate(valores)
+    ]
+
+
+def _mercado_de(tabla: pd.DataFrame, analisis: str, **filtro: Any) -> pd.Series:  # type: ignore[type-arg]
+    filas = tabla[tabla["analisis"] == analisis]
+    for columna, valor in filtro.items():
+        filas = filas[filas[columna] == valor]
+    assert len(filas) == 1, (analisis, filtro, len(filas))
+    return filas.iloc[0]
+
+
+def test_mercado_dispersion_media_y_variacion(limpio: Any) -> None:
+    tabla = mercado_precios(
+        base_analisis(limpio(*_m2(10_000, 20_000, 30_000, 40_000, 50_000))), SEMANA
+    )
+    barrio = _mercado_de(tabla, "dispersion", codigo="1101")
+    assert barrio["nombre"] == "Laureles"
+    assert barrio["comuna"] == "11"
+    assert barrio["anuncios"] == 5
+    assert barrio["precio_m2_media"] == 30_000
+    assert barrio["precio_m2_mediana"] == 30_000
+    assert barrio["precio_m2_p25"] == 20_000
+    assert barrio["precio_m2_p75"] == 40_000
+    assert barrio["variacion_pct"] == 53  # desviación estándar 15.811 sobre media 30.000
+    assert barrio["semana"] == SEMANA
+
+
+def test_mercado_media_se_aleja_de_la_mediana_con_un_extremo(limpio: Any) -> None:
+    tabla = mercado_precios(
+        base_analisis(limpio(*_m2(10_000, 10_000, 10_000, 10_000, 60_000))), SEMANA
+    )
+    barrio = _mercado_de(tabla, "dispersion", codigo="1101")
+    assert barrio["precio_m2_mediana"] == 10_000
+    assert barrio["precio_m2_media"] == 20_000
+
+
+def test_mercado_minimo_de_publicacion(limpio: Any) -> None:
+    tabla = mercado_precios(base_analisis(limpio(*_m2(10_000, 20_000, 30_000, 40_000))), SEMANA)
+    assert tabla.empty
+
+
+def test_mercado_sin_precio_m2_no_cuenta(limpio: Any) -> None:
+    filas = _m2(10_000, 20_000, 30_000, 40_000, 50_000)
+    filas[0]["precio_m2"] = None
+    assert mercado_precios(base_analisis(limpio(*filas)), SEMANA).empty
+
+
+def test_mercado_venta_y_arriendo_separados(limpio: Any) -> None:
+    filas = [
+        *_m2(10_000, 20_000, 30_000, 40_000, 50_000),
+        *_m2(1_000_000, 2_000_000, 3_000_000, 4_000_000, 5_000_000, operacion="venta"),
+    ]
+    tabla = mercado_precios(base_analisis(limpio(*filas)), SEMANA)
+    assert _mercado_de(tabla, "dispersion", operacion="arriendo")["precio_m2_mediana"] == 30_000
+    assert _mercado_de(tabla, "dispersion", operacion="venta")["precio_m2_mediana"] == 3_000_000
+
+
+def test_mercado_tipos_comparados(limpio: Any) -> None:
+    filas = [
+        *_m2(10_000, 20_000, 30_000, 40_000, 50_000),
+        *_m2(1, 2, 3, 4, 5, tipo_normalizado="local"),
+        *_m2(1, 2, 3, 4, 5, tipo_normalizado="apartaestudio"),
+        *_m2(1, 2, 3, 4, 5, tipo_normalizado="bodega"),
+    ]
+    tabla = mercado_precios(base_analisis(limpio(*filas)), SEMANA)
+    tipos = tabla[tabla["analisis"] == "tipo"]
+    assert sorted(tipos["categoria"]) == ["apartamento", "local"]
+    local = _mercado_de(tabla, "tipo", categoria="local")
+    assert local["codigo"] == "11"
+    assert local["nombre"] == "LAURELES ESTADIO"
+    assert local["precio_m2_mediana"] == 3
+    # la dispersión por barrio es solo de vivienda: el local no entra
+    assert _mercado_de(tabla, "dispersion", codigo="1101")["anuncios"] == 10
+
+
+@pytest.mark.parametrize(
+    ("area", "rango"),
+    [
+        (39.9, "Menos de 40"),
+        (40.0, "40 a 70"),
+        (70.0, "70 a 100"),
+        (149.9, "100 a 150"),
+        (150.0, "Más de 150"),
+    ],
+)
+def test_mercado_rangos_de_area(limpio: Any, area: float, rango: str) -> None:
+    tabla = mercado_precios(
+        base_analisis(limpio(*_m2(10_000, 20_000, 30_000, 40_000, 50_000, area_m2=area))), SEMANA
+    )
+    fila_area = _mercado_de(tabla, "area")
+    assert fila_area["categoria"] == rango
+    assert fila_area["codigo"] == "ciudad"
+    assert pd.isna(fila_area["comuna"])
+
+
+def test_mercado_estrato_solo_declarado(limpio: Any) -> None:
+    con = _m2(10_000, 20_000, 30_000, 40_000, 50_000, estrato=5)
+    sin = _m2(1, 2, 3, 4, 5, estrato=None, area_m2=50.0)
+    tabla = mercado_precios(base_analisis(limpio(*con, *sin)), SEMANA)
+    estratos = tabla[tabla["analisis"] == "estrato"]
+    assert list(estratos["categoria"]) == ["5"]
+    assert estratos.iloc[0]["precio_m2_mediana"] == 30_000
+
+
+def test_mercado_atipicos_fuera(limpio: Any) -> None:
+    filas = _m2(10_000, 20_000, 30_000, 40_000, 50_000)
+    filas[0]["es_atipico"] = True
+    assert mercado_precios(base_analisis(limpio(*filas)), SEMANA).empty
+
+
+def test_mercado_vacia(limpio: Any) -> None:
+    tabla = mercado_precios(base_analisis(limpio()), SEMANA)
+    assert tabla.empty
+    assert list(tabla.columns) == COLUMNAS_MERCADO
+    assert str(tabla["anuncios"].dtype) == "Int64"
+    assert str(tabla["variacion_pct"].dtype) == "Int64"
+    assert str(tabla["categoria"].dtype) == "string"
+
+
+def test_mercado_tipos_con_datos(limpio: Any) -> None:
+    tabla = mercado_precios(
+        base_analisis(limpio(*_m2(10_000, 20_000, 30_000, 40_000, 50_000))), SEMANA
+    )
+    assert list(tabla.columns) == COLUMNAS_MERCADO
+    assert str(tabla["precio_m2_media"].dtype) == "Int64"
+    assert str(tabla["codigo"].dtype) == "string"

@@ -4,6 +4,7 @@ import pandas as pd
 import plotly.graph_objects as go
 import pytest
 
+from observatorio_inmobiliario.agregados import MINIMO_PUBLICACION, RANGOS_AREA
 from observatorio_inmobiliario.almacenamiento import TABLAS_AGREGADAS
 from observatorio_inmobiliario.tablero import graficas, vista
 from observatorio_inmobiliario.tablero.datos import (
@@ -111,6 +112,12 @@ def _llamadas(tablas: dict[str, pd.DataFrame]) -> list[go.Figure]:
         graficas.estratos(tablas["estratos_inmobiliaria"]),
         graficas.compartidos(tablas["compartidos_fuentes"], "media"),
         graficas.evolucion(tablas["evolucion_precios"], "venta"),
+        graficas.dispersion_barrios(tablas["mercado_precios"], "venta"),
+        graficas.precio_estratos(tablas["mercado_precios"], "arriendo"),
+        graficas.tipos_por_comuna(tablas["mercado_precios"], "venta"),
+        graficas.rangos_area(tablas["mercado_precios"], "arriendo"),
+        graficas.precio_comunas(tablas["precios_zona"], "venta"),
+        graficas.rentabilidad_barrios(tablas["precios_zona"]),
     ]
 
 
@@ -127,6 +134,65 @@ def test_graficas_con_tablas_vacias(vacias: dict[str, pd.DataFrame]) -> None:
 
 def test_colores_fijos_por_inmobiliaria(reales: dict[str, pd.DataFrame]) -> None:
     assert set(graficas.COLORES_FUENTE) >= set(reales["cobertura_inmobiliaria"]["fuente"])
+
+
+def test_graficas_de_precios_tienen_datos(reales: dict[str, pd.DataFrame]) -> None:
+    mercado, precios = reales["mercado_precios"], reales["precios_zona"]
+    for operacion in ("venta", "arriendo"):
+        for figura in (
+            graficas.dispersion_barrios(mercado, operacion),
+            graficas.precio_estratos(mercado, operacion),
+            graficas.tipos_por_comuna(mercado, operacion),
+            graficas.rangos_area(mercado, operacion),
+            graficas.precio_comunas(precios, operacion),
+        ):
+            assert figura.data, figura.layout.title.text
+    areas = graficas.rangos_area(mercado, "venta")
+    assert set(areas.data[0].x) <= set(RANGOS_AREA)
+
+
+def test_tabla_dispersion(reales: dict[str, pd.DataFrame]) -> None:
+    tabla = graficas.tabla_dispersion(reales["mercado_precios"], "venta")
+    assert not tabla.empty
+    assert {"Barrio", "Mediana (m²)", "Media (m²)", "Variación (%)"} <= set(tabla.columns)
+    assert tabla["Variación (%)"].is_monotonic_decreasing
+    assert (tabla["Anuncios"] >= MINIMO_PUBLICACION).all()
+
+
+def test_tabla_dispersion_vacia(vacias: dict[str, pd.DataFrame]) -> None:
+    assert graficas.tabla_dispersion(vacias["mercado_precios"], "venta").empty
+
+
+def test_rentabilidad_es_arriendo_anual_sobre_venta(reales: dict[str, pd.DataFrame]) -> None:
+    tabla = graficas.tabla_rentabilidad(reales["precios_zona"])
+    assert not tabla.empty
+    esperada = tabla["Arriendo (m²)"] * 12 / tabla["Venta (m²)"] * 100
+    assert ((tabla["Rentabilidad bruta (%)"] - esperada).abs() < 0.1).all()
+    assert tabla["Rentabilidad bruta (%)"].is_monotonic_decreasing
+    anios = 100 / tabla["Rentabilidad bruta (%)"]
+    assert ((tabla["Años de arriendo = compra"] - anios).abs() < 0.2).all()
+
+
+def test_rentabilidad_lecturas_en_tres_grupos(reales: dict[str, pd.DataFrame]) -> None:
+    tabla = graficas.tabla_rentabilidad(reales["precios_zona"])
+    assert set(tabla["Lectura"]) == set(graficas.LECTURAS)
+    por_lectura = tabla.groupby("Lectura")["Rentabilidad bruta (%)"]
+    assert por_lectura.min()["Favorece comprar"] >= por_lectura.max()["Intermedio"]
+    assert por_lectura.min()["Intermedio"] >= por_lectura.max()["Favorece arrendar"]
+    assert abs(tabla["Lectura"].value_counts().max() - tabla["Lectura"].value_counts().min()) <= 1
+
+
+def test_rentabilidad_solo_barrios_con_venta_y_arriendo(
+    reales: dict[str, pd.DataFrame],
+) -> None:
+    precios = reales["precios_zona"]
+    solo_venta = precios[precios["operacion"] == "venta"]
+    assert graficas.tabla_rentabilidad(solo_venta).empty
+    assert graficas.rentabilidad_barrios(solo_venta).layout.title.text
+
+
+def test_rentabilidad_vacia(vacias: dict[str, pd.DataFrame]) -> None:
+    assert graficas.tabla_rentabilidad(vacias["precios_zona"]).empty
 
 
 # ---------------------------------------------------------------- Formato

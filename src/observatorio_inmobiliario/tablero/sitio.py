@@ -71,7 +71,7 @@ def _seccion(id_: str, titulo: str, contenido: list[str]) -> str:
 
 
 def generar_sitio(tablas: dict[str, pd.DataFrame], geojson: dict[str, Any], salida: Path) -> Path:
-    """Escribe ``salida/index.html`` con las 6 secciones del dashboard y devuelve su ruta."""
+    """Escribe ``salida/index.html`` con las 7 secciones del dashboard y devuelve su ruta."""
     figura = _Graficas()
     cobertura = tablas["cobertura_inmobiliaria"]
     semana = str(cobertura["semana"].iloc[0]) if not cobertura.empty else "sin datos"
@@ -101,6 +101,49 @@ def generar_sitio(tablas: dict[str, pd.DataFrame], geojson: dict[str, Any], sali
             figura(graficas.comparacion_comunas(precios)),
             "<p>Rentabilidad bruta = arriendo de un año ÷ precio de venta del m². Es una "
             "orientación: compara medianas de anuncios distintos y no descuenta gastos.</p>",
+        ],
+    )
+    mercado = tablas["mercado_precios"]
+    analisis = _seccion(
+        "precios",
+        "Análisis de precios",
+        [
+            "<p>Seis preguntas sobre el precio de la vivienda. Todo usa la mediana y los "
+            "cuartiles, y cada cifra resume 5 anuncios o más.</p>",
+            "<h3>1. ¿Cuánto cuesta el m² y dónde es más caro o más barato?</h3>",
+            figura(graficas.precio_comunas(precios, "venta")),
+            figura(graficas.precio_comunas(precios, "arriendo")),
+            figura(graficas.precio_estratos(mercado, "venta")),
+            figura(graficas.precio_estratos(mercado, "arriendo")),
+            "<p>El estrato solo está en los anuncios que lo declaran. Las barras de error "
+            "van del cuartil 25 al 75.</p>",
+            "<h3>2. ¿Qué tan parejo es el precio dentro de cada barrio?</h3>",
+            figura(graficas.dispersion_barrios(mercado, "venta")),
+            figura(graficas.dispersion_barrios(mercado, "arriendo")),
+            "<p>La variación es la desviación estándar dividida por la media: con valores "
+            "altos, el promedio del barrio no lo describe bien.</p>",
+            "<h4>Venta</h4>",
+            _tabla(graficas.tabla_dispersion(mercado, "venta")),
+            "<h4>Arriendo</h4>",
+            _tabla(graficas.tabla_dispersion(mercado, "arriendo")),
+            "<h3>3. ¿Cuánto cambia el precio según el tipo de inmueble?</h3>",
+            figura(graficas.tipos_por_comuna(mercado, "venta")),
+            figura(graficas.tipos_por_comuna(mercado, "arriendo")),
+            "<p>Solo aparecen las comunas con 5 anuncios o más de ese tipo.</p>",
+            "<h3>4. ¿Cómo cambia el m² con la operación y el área?</h3>",
+            figura(graficas.rangos_area(mercado, "venta")),
+            figura(graficas.rangos_area(mercado, "arriendo")),
+            "<h3>5. ¿Cuánto rinde un inmueble por barrio?</h3>",
+            figura(graficas.rentabilidad_barrios(precios)),
+            "<p>Rentabilidad bruta = arriendo de un año ÷ precio de venta del m². Compara "
+            "medianas de anuncios distintos y no descuenta administración, impuestos ni "
+            "vacancia.</p>",
+            "<h3>6. ¿En qué barrios conviene más comprar que arrendar?</h3>",
+            "<p>Los barrios se ordenan por rentabilidad y se dividen en tres grupos iguales: "
+            "donde es alta, comprar sale relativamente barato frente a arrendar; donde es "
+            "baja, arrendar. Es una comparación entre barrios, no una recomendación: no "
+            "incluye crédito, valorización ni costo de oportunidad.</p>",
+            _tabla(graficas.tabla_rentabilidad(precios)),
         ],
     )
     indice = reconocimiento(cobertura, None)
@@ -184,12 +227,12 @@ def generar_sitio(tablas: dict[str, pd.DataFrame], geojson: dict[str, Any], sali
 Datos de la semana <b>{escape(semana)}</b>.</div>
 </header>
 <nav>
-<a href="#resumen">Resumen</a><a href="#barrios">Barrios</a>
+<a href="#resumen">Resumen</a><a href="#barrios">Barrios</a><a href="#precios">Precios</a>
 <a href="#inmobiliarias">Inmobiliarias</a><a href="#compartidos">Compartidas</a>
 <a href="#evolucion">Evolución</a><a href="#metodologia">Metodología</a>
 </nav>
 <main>
-{resumen}{barrios}{inmobiliarias}{compartidos}{evolucion}{metodologia}
+{resumen}{barrios}{analisis}{inmobiliarias}{compartidos}{evolucion}{metodologia}
 </main>
 <footer>Generado a partir de <code>data/agregados/</code> ·
 <a href="{REPOSITORIO}">Código en GitHub</a></footer>

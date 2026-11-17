@@ -44,7 +44,7 @@ def _tablas(directorio: Path, firma: tuple[tuple[str, float], ...]) -> dict[str,
 
 
 def tablas(directorio: Path | None = None) -> dict[str, pd.DataFrame]:
-    """Las 9 tablas agregadas, con caché.
+    """Las 10 tablas agregadas, con caché.
 
     La caché se invalida cuando cambia algún archivo de ``data/agregados/``: con la
     actualización semanal, el dashboard muestra la semana nueva sin reiniciar el servidor.

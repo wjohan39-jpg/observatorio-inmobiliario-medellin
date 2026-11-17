@@ -149,6 +149,14 @@ def test_precios_sin_columnas_privadas() -> None:
         assert not columnas & {"id_fuente", "url", "latitud", "longitud"}
 
 
+def test_compartidos_muestra_inventario_compartido() -> None:
+    app = _correr("pages/4_Propiedades_compartidas.py")
+    etiquetas = [m.label for m in app.metric]
+    assert "Inmuebles en más de una inmobiliaria" in etiquetas
+    app.radio(key="nivel_compartidos").set_value("media").run()
+    assert not app.exception
+
+
 def test_compartidos_sin_columnas_privadas() -> None:
     app = _correr("pages/4_Propiedades_compartidas.py")
     assert app.dataframe

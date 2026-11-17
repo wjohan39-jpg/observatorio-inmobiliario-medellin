@@ -5,12 +5,15 @@ import pytest
 
 from conftest import fila
 from observatorio_inmobiliario.agregados import (
+    COLUMNAS_COMPARTIDAS,
+    MINIMO_PARES_PRECIO,
     NIVELES,
     anuncios_unicos,
     base_analisis,
     calidad_inmobiliaria,
     cobertura_comuna,
     cobertura_inmobiliaria,
+    compartidas_inmobiliaria,
     compartidos_fuentes,
     con_vivienda,
     cuota_zona,
@@ -972,3 +975,112 @@ def test_calidad_vacia(limpio: Any) -> None:
     assert tabla.empty
     assert list(tabla.columns)[:3] == ["semana", "fuente", "anuncios"]
     assert tabla.columns[-1] == "indice_completitud"
+
+
+# ------------------------------------------------- Compartidas por inmobiliaria
+
+
+def _compartida(
+    base: pd.DataFrame,
+) -> pd.DataFrame:
+    parejas = emparejar(base)
+    return compartidas_inmobiliaria(parejas, agrupar(parejas), base, SEMANA)
+
+
+def _celda(tabla: pd.DataFrame, nivel: str, fuente: str, otra: str) -> pd.Series:  # type: ignore[type-arg]
+    filas = tabla[(tabla["nivel"] == nivel) & (tabla["fuente"] == fuente) & (tabla["otra"] == otra)]
+    assert len(filas) == 1, (nivel, fuente, otra, len(filas))
+    return filas.iloc[0]
+
+
+def test_compartidas_cuenta_inventario_compartido(limpio: Any) -> None:
+    base = base_analisis(
+        limpio(
+            fila(fuente="santafe", id_fuente="S1", precio=2_000_000),
+            fila(fuente="nutibara", id_fuente="N1", precio=2_100_000),
+            fila(fuente="alnago", id_fuente="A1", precio=1_900_000, estrato=None),
+            fila(fuente="santafe", id_fuente="S2", precio=3_000_000, area_m2=200.0),
+        )
+    )
+    tabla = _compartida(base)
+
+    total = _celda(tabla, "alta", "todas", "todas")
+    assert (total["anuncios"], total["compartidos"], total["inmuebles"]) == (4, 3, 1)
+    assert total["parejas"] == 3
+    assert total["pct_compartido"] == 75.0
+    santafe = _celda(tabla, "alta", "santafe", "todas")
+    assert (santafe["anuncios"], santafe["compartidos"], santafe["parejas"]) == (2, 1, 2)
+    assert santafe["pct_compartido"] == 50.0
+    assert _celda(tabla, "alta", "santafe", "nutibara")["compartidos"] == 1
+    assert _celda(tabla, "alta", "nutibara", "santafe")["compartidos"] == 1
+    assert set(tabla["semana"]) == {SEMANA}
+    assert list(tabla.columns) == COLUMNAS_COMPARTIDAS
+
+
+def test_compartidas_precio_exige_minimo_de_parejas(limpio: Any) -> None:
+    filas = [
+        fila(fuente="santafe", id_fuente="S1", precio=1_100_000),
+        fila(fuente="nutibara", id_fuente="N1", precio=1_000_000),
+    ]
+    resumen = _celda(_compartida(base_analisis(limpio(*filas))), "alta", "santafe", "todas")
+    assert resumen["parejas_precio"] == 1
+    assert pd.isna(resumen["diferencia_mediana_pct"])  # una pareja no basta
+
+
+def test_compartidas_precio_por_encima_y_por_debajo(limpio: Any) -> None:
+    filas = []
+    for i in range(MINIMO_PARES_PRECIO):
+        area = 50.0 + 20 * i  # áreas lejanas entre sí: cada inmueble es una pareja distinta
+        filas.append(fila(fuente="santafe", id_fuente=f"S{i}", precio=1_100_000, area_m2=area))
+        filas.append(fila(fuente="nutibara", id_fuente=f"N{i}", precio=1_000_000, area_m2=area))
+    tabla = _compartida(base_analisis(limpio(*filas)))
+
+    santafe = _celda(tabla, "alta", "santafe", "todas")
+    assert santafe["parejas_precio"] == MINIMO_PARES_PRECIO
+    assert santafe["diferencia_mediana_pct"] == pytest.approx(10.0)
+    assert santafe["diferencia_media_pct"] == pytest.approx(10.0)
+    assert santafe["pct_mas_cara"] == 100
+    assert santafe["pct_mas_barata"] == 0
+    nutibara = _celda(tabla, "alta", "nutibara", "todas")
+    assert nutibara["diferencia_mediana_pct"] == pytest.approx(-9.1)
+    assert nutibara["pct_mas_barata"] == 100
+    assert _celda(tabla, "alta", "todas", "todas")["inmuebles"] == MINIMO_PARES_PRECIO
+
+
+def test_compartidas_mismo_precio(limpio: Any) -> None:
+    filas = []
+    for i in range(MINIMO_PARES_PRECIO):
+        area = 50.0 + 20 * i
+        filas.append(fila(fuente="santafe", id_fuente=f"S{i}", precio=1_000_000, area_m2=area))
+        filas.append(fila(fuente="nutibara", id_fuente=f"N{i}", precio=1_000_000, area_m2=area))
+    santafe = _celda(_compartida(base_analisis(limpio(*filas))), "alta", "santafe", "todas")
+    assert santafe["pct_mismo_precio"] == 100
+    assert santafe["diferencia_media_pct"] == 0
+
+
+def test_compartidas_niveles_acumulados(limpio: Any) -> None:
+    base = base_analisis(
+        limpio(
+            fila(fuente="santafe", id_fuente="S1"),
+            fila(fuente="nutibara", id_fuente="N1"),
+        )
+    )
+    tabla = _compartida(base)
+    compartidos = [_celda(tabla, n, "todas", "todas")["compartidos"] for n in NIVELES]
+    assert compartidos == sorted(compartidos)  # media incluye alta, baja incluye media
+    assert compartidos[0] == 2
+
+
+def test_compartidas_inmobiliaria_sin_parejas(limpio: Any) -> None:
+    base = base_analisis(limpio(fila(fuente="santafe", id_fuente="S1")))
+    tabla = _compartida(base)
+    assert _celda(tabla, "alta", "santafe", "todas")["compartidos"] == 0
+    assert _celda(tabla, "alta", "todas", "todas")["inmuebles"] == 0
+
+
+def test_compartidas_vacia(limpio: Any) -> None:
+    tabla = _compartida(base_analisis(limpio()))
+    assert tabla.empty
+    assert list(tabla.columns) == COLUMNAS_COMPARTIDAS
+    assert str(tabla["compartidos"].dtype) == "Int64"
+    assert str(tabla["pct_compartido"].dtype) == "float64"

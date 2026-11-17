@@ -3,11 +3,13 @@
 import _ruta  # noqa: F401  (agrega src/ al path si el paquete no está instalado)
 import streamlit as st
 
+from observatorio_inmobiliario.agregados import MINIMO_PARES_PRECIO
 from observatorio_inmobiliario.tablero import graficas, vista
 
 vista.configurar("Propiedades compartidas")
 t = vista.tablas()
 fuentes, grupos = t["compartidos_fuentes"], t["grupos_compartidos"]
+compartidas = t["compartidas_inmobiliaria"]
 
 st.title("Propiedades compartidas")
 st.markdown(
@@ -44,6 +46,40 @@ st.plotly_chart(graficas.compartidos(fuentes, nivel), width="stretch")
 st.caption(
     "El color es la diferencia de precio mediana entre las dos inmobiliarias. Con pocas "
     "parejas, esa mediana es poco estable: mira la columna de parejas."
+)
+
+st.subheader("Cuánto inventario comparte cada inmobiliaria")
+semanas = {str(x["semana"].iloc[0]) for x in (fuentes, grupos, compartidas) if not x.empty}
+if len(semanas) > 1:
+    st.info(
+        "Las tablas de esta página vienen de semanas distintas "
+        f"({', '.join(sorted(semanas))}). Se alinean con la próxima ejecución semanal completa."
+    )
+resumen = graficas.resumen_compartidas(compartidas, nivel)
+if resumen is None:
+    vista.sin_datos("inventario compartido por inmobiliaria")
+else:
+    a, b, c = st.columns(3)
+    a.metric("Inmuebles en más de una inmobiliaria", vista.entero(resumen["inmuebles"]))
+    b.metric("Anuncios compartidos", vista.entero(resumen["compartidos"]))
+    c.metric("Parte del inventario", f"{resumen['pct']:.1f} %".replace(".", ","))
+    st.plotly_chart(graficas.compartidas_por_inmobiliaria(compartidas, nivel), width="stretch")
+    st.plotly_chart(graficas.matriz_compartidas(compartidas, nivel), width="stretch")
+    st.caption(
+        "Es probablemente un mínimo: para emparejar se exigen comuna, tipo, área, alcobas y "
+        "baños iguales, y las inmobiliarias que casi no publican coordenadas se emparejan "
+        "menos. Villacruz muestra solo su inventario propio."
+    )
+
+st.subheader("¿Quién publica más caro o más barato el mismo inmueble?")
+st.plotly_chart(graficas.precio_relativo(compartidas, nivel), width="stretch")
+st.dataframe(graficas.tabla_compartidas(compartidas, nivel), hide_index=True, width="stretch")
+st.caption(
+    "Positivo: publica por encima de la otra inmobiliaria. Solo aparecen las que tienen "
+    f"{MINIMO_PARES_PRECIO} parejas con precio o más. El número entre paréntesis son las "
+    "parejas: con pocas, un par de casos decide. Una diferencia grande puede ser un "
+    "emparejamiento equivocado (otra unidad del mismo edificio) o un precio desactualizado, "
+    "y la media se mueve mucho más que la mediana por esos casos."
 )
 
 st.subheader("Grupos")

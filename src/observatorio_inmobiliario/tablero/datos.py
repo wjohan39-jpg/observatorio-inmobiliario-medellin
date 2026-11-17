@@ -33,7 +33,7 @@ GEOJSON: Final = RAIZ / "datos_referencia" / "barrios_medellin.geojson"
 
 
 def tablas_vacias() -> dict[str, pd.DataFrame]:
-    """Las 15 tablas agregadas vacías, con sus columnas y tipos.
+    """Las 16 tablas agregadas vacías, con sus columnas y tipos.
 
     Se arman con las mismas funciones que las generan, aplicadas a una tabla limpia vacía,
     así nunca se desalinean con ellas.
@@ -50,6 +50,9 @@ def tablas_vacias() -> dict[str, pd.DataFrame]:
         "cuota_zona": agregados.cuota_zona(base, semana),
         "perfil_inmobiliaria": agregados.perfil_inmobiliaria(base, semana),
         "calidad_inmobiliaria": agregados.calidad_inmobiliaria(base, semana),
+        "compartidas_inmobiliaria": agregados.compartidas_inmobiliaria(
+            parejas, agrupar(parejas), base, semana
+        ),
         "cobertura_inmobiliaria": agregados.cobertura_inmobiliaria(base, semana),
         "cobertura_comuna": agregados.cobertura_comuna(base, semana),
         "economia_inmobiliaria": agregados.economia_inmobiliaria(base, semana),
@@ -62,7 +65,7 @@ def tablas_vacias() -> dict[str, pd.DataFrame]:
 
 
 def cargar_agregados(directorio: Path | None = None) -> dict[str, pd.DataFrame]:
-    """Las 15 tablas agregadas. Si falta un archivo, su tabla llega vacía (con columnas)."""
+    """Las 16 tablas agregadas. Si falta un archivo, su tabla llega vacía (con columnas)."""
     directorio = directorio or AGREGADOS
     vacias = tablas_vacias()
     return {

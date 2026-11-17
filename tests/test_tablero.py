@@ -4,7 +4,11 @@ import pandas as pd
 import plotly.graph_objects as go
 import pytest
 
-from observatorio_inmobiliario.agregados import MINIMO_PUBLICACION, RANGOS_AREA
+from observatorio_inmobiliario.agregados import (
+    MINIMO_PARES_PRECIO,
+    MINIMO_PUBLICACION,
+    RANGOS_AREA,
+)
 from observatorio_inmobiliario.almacenamiento import TABLAS_AGREGADAS
 from observatorio_inmobiliario.tablero import graficas, vista
 from observatorio_inmobiliario.tablero.datos import (
@@ -131,6 +135,9 @@ def _llamadas(tablas: dict[str, pd.DataFrame]) -> list[go.Figure]:
         graficas.perfil_tipos(tablas["perfil_inmobiliaria"], "venta"),
         graficas.perfil_operacion(tablas["perfil_inmobiliaria"]),
         graficas.calidad_datos(tablas["calidad_inmobiliaria"]),
+        graficas.compartidas_por_inmobiliaria(tablas["compartidas_inmobiliaria"], "media"),
+        graficas.matriz_compartidas(tablas["compartidas_inmobiliaria"], "alta"),
+        graficas.precio_relativo(tablas["compartidas_inmobiliaria"], "media"),
     ]
 
 
@@ -406,6 +413,67 @@ def test_perfil_y_calidad_vacios(vacias: dict[str, pd.DataFrame]) -> None:
         vacias["perfil_inmobiliaria"], vacias["estratos_inmobiliaria"]
     ).empty
     assert graficas.tabla_calidad(vacias["calidad_inmobiliaria"]).empty
+
+
+def test_resumen_compartidas_es_coherente(reales: dict[str, pd.DataFrame]) -> None:
+    for nivel in ("alta", "media", "baja"):
+        resumen = graficas.resumen_compartidas(reales["compartidas_inmobiliaria"], nivel)
+        assert resumen is not None
+        assert 0 < resumen["inmuebles"] <= resumen["compartidos"] <= resumen["anuncios"]
+        assert resumen["pct"] == pytest.approx(
+            resumen["compartidos"] / resumen["anuncios"] * 100, abs=0.1
+        )
+
+
+def test_compartidas_niveles_acumulados_reales(reales: dict[str, pd.DataFrame]) -> None:
+    compartidas = reales["compartidas_inmobiliaria"]
+    inmuebles = [
+        graficas.resumen_compartidas(compartidas, n)["inmuebles"]  # type: ignore[index]
+        for n in ("alta", "media", "baja")
+    ]
+    assert inmuebles == sorted(inmuebles)
+
+
+def test_compartidas_parejas_son_simetricas(reales: dict[str, pd.DataFrame]) -> None:
+    cruces = reales["compartidas_inmobiliaria"]
+    cruces = cruces[(cruces["fuente"] != "todas") & (cruces["otra"] != "todas")]
+    cruces = cruces[cruces["nivel"] == "media"]
+    parejas = {
+        (f, o): int(n)
+        for f, o, n in zip(cruces["fuente"], cruces["otra"], cruces["parejas"], strict=True)
+    }
+    assert parejas
+    for (fuente, otra), n in parejas.items():
+        assert parejas[(otra, fuente)] == n
+
+
+def test_matriz_compartidas_sin_diagonal(reales: dict[str, pd.DataFrame]) -> None:
+    figura = graficas.matriz_compartidas(reales["compartidas_inmobiliaria"], "media")
+    matriz = pd.DataFrame(figura.data[0].z)
+    assert matriz.shape[0] == matriz.shape[1]
+    assert all(pd.isna(matriz.iloc[i, i]) for i in range(len(matriz)))
+
+
+def test_precio_relativo_solo_con_minimo(reales: dict[str, pd.DataFrame]) -> None:
+    compartidas = reales["compartidas_inmobiliaria"]
+    figura = graficas.precio_relativo(compartidas, "media")
+    etiquetas = list(figura.data[0].y)
+    assert etiquetas
+    for etiqueta in etiquetas:
+        pares = int(etiqueta.rsplit("(", 1)[1].rstrip(")"))
+        assert pares >= MINIMO_PARES_PRECIO
+
+
+def test_tabla_compartidas(reales: dict[str, pd.DataFrame]) -> None:
+    tabla = graficas.tabla_compartidas(reales["compartidas_inmobiliaria"], "media")
+    assert {"Inmobiliaria", "Compartido (%)", "Diferencia media (%)"} <= set(tabla.columns)
+    assert tabla["Compartido (%)"].is_monotonic_decreasing
+    assert "todas" not in set(tabla["Inmobiliaria"])
+
+
+def test_compartidas_vacias(vacias: dict[str, pd.DataFrame]) -> None:
+    assert graficas.resumen_compartidas(vacias["compartidas_inmobiliaria"], "alta") is None
+    assert graficas.tabla_compartidas(vacias["compartidas_inmobiliaria"], "alta").empty
 
 
 # ---------------------------------------------------------------- Formato

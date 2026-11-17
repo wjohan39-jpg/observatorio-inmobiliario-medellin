@@ -13,6 +13,7 @@ from typing import Any, Final
 import pandas as pd
 import plotly.graph_objects as go
 
+from observatorio_inmobiliario.agregados import MINIMO_PARES_PRECIO
 from observatorio_inmobiliario.reputacion import reconocimiento
 from observatorio_inmobiliario.tablero import graficas
 from observatorio_inmobiliario.tablero.formato import entero, indicadores
@@ -64,6 +65,18 @@ def _tabla(df: pd.DataFrame) -> str:
     if df.empty:
         return _aviso("Todavía no hay datos para esta tabla.")
     return '<div class="tabla">' + df.to_html(index=False, na_rep="—", border=0) + "</div>"
+
+
+def _resumen_compartidas(resumen: dict[str, float] | None) -> str:
+    """Una frase con los inmuebles compartidos, o el aviso de que no hay datos."""
+    if resumen is None:
+        return _aviso("Todavía no hay datos de inventario compartido.")
+    porcentaje = str(round(resumen["pct"], 1)).replace(".", ",")
+    return (
+        f"<p><b>{entero(int(resumen['inmuebles']))}</b> inmuebles aparecen en más de una "
+        f"inmobiliaria ({entero(int(resumen['compartidos']))} anuncios, "
+        f"{porcentaje} % del inventario).</p>"
+    )
 
 
 def _seccion(id_: str, titulo: str, contenido: list[str]) -> str:
@@ -247,6 +260,7 @@ def generar_sitio(tablas: dict[str, pd.DataFrame], geojson: dict[str, Any], sali
         ],
     )
     fuentes, grupos = tablas["compartidos_fuentes"], tablas["grupos_compartidos"]
+    compartidas = tablas["compartidas_inmobiliaria"]
     compartidos = _seccion(
         "compartidos",
         "Propiedades compartidas",
@@ -254,6 +268,19 @@ def generar_sitio(tablas: dict[str, pd.DataFrame], geojson: dict[str, Any], sali
             "<p>El mismo inmueble publicado por dos o más inmobiliarias. El precio no se usa "
             "para emparejar: es lo que se compara. Confianza <b>media o mayor</b>.</p>",
             figura(graficas.compartidos(fuentes, "media")),
+            "<h3>Cuánto inventario comparte cada inmobiliaria</h3>",
+            _resumen_compartidas(graficas.resumen_compartidas(compartidas, "media")),
+            figura(graficas.compartidas_por_inmobiliaria(compartidas, "media")),
+            figura(graficas.matriz_compartidas(compartidas, "media")),
+            "<p>Es probablemente un mínimo: para emparejar se exigen comuna, tipo, área, "
+            "alcobas y baños iguales, y las inmobiliarias que casi no publican coordenadas se "
+            "emparejan menos.</p>",
+            "<h3>¿Quién publica más caro o más barato el mismo inmueble?</h3>",
+            figura(graficas.precio_relativo(compartidas, "media")),
+            _tabla(graficas.tabla_compartidas(compartidas, "media")),
+            "<p>Positivo: publica por encima de la otra inmobiliaria. Solo aparecen las que "
+            f"tienen {MINIMO_PARES_PRECIO} parejas con precio o más. Una diferencia grande "
+            "puede ser un emparejamiento equivocado o un precio desactualizado.</p>",
             "<h3>Grupos de confianza alta</h3>",
             "<p>Una fila por inmueble, con el precio de cada inmobiliaria. Sin enlaces ni "
             "textos de los anuncios.</p>",

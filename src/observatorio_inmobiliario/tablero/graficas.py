@@ -20,6 +20,7 @@ from observatorio_inmobiliario.agregados import (
     ANALISIS_DISPERSION,
     ANALISIS_ESTRATO,
     ANALISIS_TIPO,
+    GLOBAL,
     NIVEL_CIUDAD,
     RANGOS_AREA,
     RANGOS_PRECIO,
@@ -1253,3 +1254,145 @@ def tabla_hhi(cuota: pd.DataFrame, nivel: str, operacion: str) -> pd.DataFrame:
             "cuota_lider": "Cuota del líder (%)",
         }
     )
+
+
+# ------------------------------------------------- Compartidas por inmobiliaria
+
+
+def _compartidas(compartidas: pd.DataFrame, nivel: str) -> pd.DataFrame:
+    return compartidas[compartidas["nivel"] == nivel]
+
+
+def resumen_compartidas(compartidas: pd.DataFrame, nivel: str) -> dict[str, float] | None:
+    """Inmuebles distintos, anuncios compartidos y su % del inventario, o ``None`` sin datos."""
+    filas = _compartidas(compartidas, nivel)
+    total = filas[(filas["fuente"] == GLOBAL) & (filas["otra"] == GLOBAL)]
+    if total.empty:
+        return None
+    fila = total.iloc[0]
+    return {
+        "inmuebles": int(fila["inmuebles"]),
+        "compartidos": int(fila["compartidos"]),
+        "anuncios": int(fila["anuncios"]),
+        "pct": float(fila["pct_compartido"]),
+    }
+
+
+def _por_inmobiliaria(compartidas: pd.DataFrame, nivel: str) -> pd.DataFrame:
+    """El resumen de cada inmobiliaria (sin la fila global ni los cruces)."""
+    filas = _compartidas(compartidas, nivel)
+    return filas[(filas["otra"] == GLOBAL) & (filas["fuente"] != GLOBAL)]
+
+
+def compartidas_por_inmobiliaria(compartidas: pd.DataFrame, nivel: str) -> go.Figure:
+    """Qué % de los anuncios de cada inmobiliaria también está publicado por otra."""
+    titulo = f"Inventario compartido con otras inmobiliarias (confianza {nivel} o mayor)"
+    filas = _por_inmobiliaria(compartidas, nivel)
+    if filas.empty:
+        return _sin_datos(titulo)
+    filas = filas.assign(
+        pct_compartido=filas["pct_compartido"].astype("float64"),
+        compartidos=filas["compartidos"].astype("int64"),
+        anuncios=filas["anuncios"].astype("int64"),
+    ).sort_values("pct_compartido")
+    figura = px.bar(
+        filas,
+        x="pct_compartido",
+        y="fuente",
+        orientation="h",
+        color="fuente",
+        color_discrete_map=COLORES_FUENTE,
+        hover_data={"compartidos": True, "anuncios": True, "fuente": False},
+        labels={
+            "pct_compartido": "% de sus anuncios compartidos",
+            "fuente": "",
+            "compartidos": "Anuncios compartidos",
+            "anuncios": "Anuncios",
+        },
+        template=_PLANTILLA,
+    )
+    figura.update_layout(title=titulo, showlegend=False)
+    return figura
+
+
+def matriz_compartidas(compartidas: pd.DataFrame, nivel: str) -> go.Figure:
+    """Mapa de calor: % de los anuncios de la fila que comparte con la columna."""
+    titulo = f"Qué parte del inventario de cada inmobiliaria comparte con otra (confianza {nivel})"
+    resumen = _por_inmobiliaria(compartidas, nivel)
+    if resumen.empty:
+        return _sin_datos(titulo)
+    fuentes = sorted(resumen["fuente"].astype(str))
+    cruces = _compartidas(compartidas, nivel)
+    cruces = cruces[~cruces["fuente"].isin([GLOBAL]) & (cruces["otra"] != GLOBAL)]
+    matriz = (
+        cruces.assign(pct=cruces["pct_compartido"].astype("float64"))
+        .pivot_table(index="fuente", columns="otra", values="pct", aggfunc="first")
+        .reindex(index=fuentes, columns=fuentes)
+    )
+    matriz = matriz.fillna(0)
+    for fuente in fuentes:
+        matriz.loc[fuente, fuente] = float("nan")  # una inmobiliaria no comparte consigo misma
+    figura = px.imshow(
+        matriz,
+        text_auto=".1f",
+        aspect="auto",
+        color_continuous_scale="Blues",
+        labels={"x": "Comparte con", "y": "Inmobiliaria", "color": "%"},
+    )
+    figura.update_layout(title=titulo, template=_PLANTILLA)
+    return figura
+
+
+def precio_relativo(compartidas: pd.DataFrame, nivel: str) -> go.Figure:
+    """Cuánto por encima (+) o por debajo (−) de las demás publica cada inmobiliaria."""
+    titulo = f"Precio de la inmobiliaria frente a las demás en el mismo inmueble ({nivel})"
+    filas = _por_inmobiliaria(compartidas, nivel)
+    filas = filas[filas["diferencia_mediana_pct"].notna()]
+    if filas.empty:
+        return _sin_datos(titulo)
+    filas = filas.assign(
+        etiqueta=filas["fuente"].astype(str) + " (" + filas["parejas_precio"].astype(str) + ")",
+        mediana=filas["diferencia_mediana_pct"].astype("float64"),
+        media=filas["diferencia_media_pct"].astype("float64"),
+    ).sort_values("media")
+    figura = go.Figure()
+    figura.add_bar(
+        x=filas["mediana"],
+        y=filas["etiqueta"],
+        orientation="h",
+        name="Mediana",
+        marker_color="#2c7fb8",
+    )
+    figura.add_bar(
+        x=filas["media"], y=filas["etiqueta"], orientation="h", name="Media", marker_color="#d95f0e"
+    )
+    figura.update_layout(
+        title=titulo,
+        template=_PLANTILLA,
+        barmode="group",
+        xaxis_title="% frente a la otra inmobiliaria (+ más cara, − más barata)",
+        yaxis_title="Inmobiliaria (parejas con precio)",
+    )
+    return figura
+
+
+def tabla_compartidas(compartidas: pd.DataFrame, nivel: str) -> pd.DataFrame:
+    """Una fila por inmobiliaria: cuánto comparte y cómo se compara en precio."""
+    filas = _por_inmobiliaria(compartidas, nivel)
+    if filas.empty:
+        return pd.DataFrame()
+    columnas = {
+        "fuente": "Inmobiliaria",
+        "anuncios": "Anuncios",
+        "compartidos": "Compartidos",
+        "pct_compartido": "Compartido (%)",
+        "parejas": "Parejas",
+        "parejas_precio": "Parejas con precio",
+        "diferencia_mediana_pct": "Diferencia mediana (%)",
+        "diferencia_media_pct": "Diferencia media (%)",
+        "pct_mas_cara": "Más cara (%)",
+        "pct_mas_barata": "Más barata (%)",
+        "pct_mismo_precio": "Mismo precio (%)",
+    }
+    tabla = filas.sort_values("pct_compartido", ascending=False)[list(columnas)]
+    return tabla.rename(columns=columnas).reset_index(drop=True)

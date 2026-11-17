@@ -916,3 +916,170 @@ def calidad_inmobiliaria(base: pd.DataFrame, semana: str) -> pd.DataFrame:
     tabla["anuncios"] = tabla["anuncios"].astype("Int64")
     tabla = tabla.astype({c: "string" for c in _TEXTO_CALIDAD})
     return tabla.sort_values("fuente", kind="stable")[COLUMNAS_CALIDAD].reset_index(drop=True)
+
+
+# ------------------------------------------------- Compartidas por inmobiliaria
+
+MINIMO_PARES_PRECIO: Final = 10
+"""Parejas con los dos precios que debe tener una inmobiliaria para publicar cuánto por encima
+o por debajo de las demás está: con menos, un par de casos decide el resultado."""
+GLOBAL: Final = "todas"
+"""Valor de ``fuente`` y de ``otra`` de la fila que resume a todas las inmobiliarias."""
+
+COLUMNAS_COMPARTIDAS: Final = [
+    "semana",
+    "nivel",
+    "fuente",
+    "otra",
+    "anuncios",
+    "compartidos",
+    "inmuebles",
+    "pct_compartido",
+    "parejas",
+    "parejas_precio",
+    "diferencia_mediana_pct",
+    "diferencia_media_pct",
+    "pct_mas_cara",
+    "pct_mas_barata",
+    "pct_mismo_precio",
+]
+_TIPOS_COMPARTIDAS: Final = {
+    "anuncios": "Int64",
+    "compartidos": "Int64",
+    "inmuebles": "Int64",
+    "pct_compartido": "float64",
+    "parejas": "Int64",
+    "parejas_precio": "Int64",
+    "diferencia_mediana_pct": "float64",
+    "diferencia_media_pct": "float64",
+    "pct_mas_cara": "float64",
+    "pct_mas_barata": "float64",
+    "pct_mismo_precio": "float64",
+}
+_ANUNCIO: Final = ["fuente", "id_fuente", "operacion"]
+
+
+def _lados(parejas: pd.DataFrame) -> pd.DataFrame:
+    """Cada pareja vista desde sus dos anuncios: ``fuente``, ``otra``, su precio y el del otro."""
+    lado_a = pd.DataFrame(
+        {
+            "fuente": parejas["fuente_a"],
+            "otra": parejas["fuente_b"],
+            "id_fuente": parejas["id_fuente_a"],
+            "operacion": parejas["operacion"],
+            "precio": parejas["precio_a"],
+            "precio_otra": parejas["precio_b"],
+            "confianza": parejas["confianza"],
+        }
+    )
+    lado_b = lado_a.assign(
+        fuente=parejas["fuente_b"],
+        otra=parejas["fuente_a"],
+        id_fuente=parejas["id_fuente_b"],
+        precio=parejas["precio_b"],
+        precio_otra=parejas["precio_a"],
+    )
+    return pd.concat([lado_a, lado_b], ignore_index=True)
+
+
+def _precios_relativos(lados: pd.DataFrame) -> pd.DataFrame:
+    """Por inmobiliaria, cuánto por encima o debajo (%) de la otra publica el mismo inmueble."""
+    precio = lados["precio"].astype("Float64")
+    precio_otra = lados["precio_otra"].astype("Float64")
+    con_precios = (precio.notna() & precio_otra.notna() & (precio_otra > 0)).astype(bool)
+    comparables = lados[con_precios].assign(
+        relativa=((precio[con_precios] / precio_otra[con_precios] - 1) * 100).astype("float64")
+    )
+    grupos = comparables.groupby("fuente")["relativa"]
+    resumen = pd.DataFrame(
+        {
+            "parejas_precio": grupos.size(),
+            "diferencia_mediana_pct": grupos.median(),
+            "diferencia_media_pct": grupos.mean(),
+            "pct_mas_cara": grupos.apply(lambda r: (r > 0).mean() * 100),
+            "pct_mas_barata": grupos.apply(lambda r: (r < 0).mean() * 100),
+            "pct_mismo_precio": grupos.apply(lambda r: (r == 0).mean() * 100),
+        }
+    )
+    estadisticas = [c for c in resumen.columns if c != "parejas_precio"]
+    resumen.loc[resumen["parejas_precio"] < MINIMO_PARES_PRECIO, estadisticas] = float("nan")
+    return resumen
+
+
+def compartidas_inmobiliaria(
+    parejas: pd.DataFrame, grupos: pd.DataFrame, base: pd.DataFrame, semana: str
+) -> pd.DataFrame:
+    """Cuánto inventario comparte cada inmobiliaria, con quién y a qué precio.
+
+    Una fila por nivel de confianza (acumulado, como en :func:`compartidos_fuentes`) e
+    inmobiliaria, con ``otra`` = ``"todas"`` (el resumen) o cada inmobiliaria con la que
+    comparte (la matriz). Hay además una fila ``fuente = otra = "todas"`` con el total.
+
+    * ``anuncios``: anuncios de la inmobiliaria en la base de análisis.
+    * ``compartidos``: de esos, los que forman pareja con otra inmobiliaria. ``pct_compartido``
+      es la parte que representan.
+    * ``inmuebles``: solo en la fila global, cuántos inmuebles distintos hay (grupos).
+    * Precio (solo en el resumen, y solo con :data:`MINIMO_PARES_PRECIO` parejas con los dos
+      precios): ``diferencia_*_pct`` es cuánto por encima (+) o por debajo (−) de la otra
+      inmobiliaria publica el mismo inmueble, y los ``pct_*`` son la proporción de parejas en
+      que publica más caro, más barato o igual.
+    """
+    if base.empty:
+        return _tipar(pd.DataFrame(), COLUMNAS_COMPARTIDAS, _TIPOS_COMPARTIDAS)
+    totales = base.groupby("fuente").size()
+    unicos = anuncios_unicos(base)
+    en_grupos = grupos.merge(unicos[CLAVE], on=CLAVE, how="inner")
+    lados = _lados(parejas)
+    partes = []
+    for nivel in NIVELES:
+        del_nivel = lados[lados["confianza"].isin(_hasta(nivel))]
+        columna = f"grupo_{nivel}"
+        agrupados = en_grupos[en_grupos[columna].notna()]
+
+        resumen = pd.DataFrame({"anuncios": totales})
+        resumen["compartidos"] = (
+            del_nivel.drop_duplicates(_ANUNCIO).groupby("fuente").size().reindex(totales.index)
+        )
+        resumen["parejas"] = del_nivel.groupby("fuente").size().reindex(totales.index)
+        resumen = resumen.join(_precios_relativos(del_nivel)).fillna(
+            {"compartidos": 0, "parejas": 0}
+        )
+        resumen = resumen.reset_index().assign(otra=GLOBAL)
+
+        cruce = del_nivel.drop_duplicates([*_ANUNCIO, "otra"]).groupby(["fuente", "otra"]).size()
+        parejas_cruce = del_nivel.groupby(["fuente", "otra"]).size()
+        pares = pd.DataFrame({"compartidos": cruce, "parejas": parejas_cruce}).reset_index()
+        pares["anuncios"] = pares["fuente"].map(totales)
+
+        total = pd.DataFrame(
+            [
+                {
+                    "fuente": GLOBAL,
+                    "otra": GLOBAL,
+                    "anuncios": int(totales.sum()),
+                    "compartidos": len(agrupados),
+                    "inmuebles": agrupados[columna].nunique(),
+                    "parejas": len(parejas[parejas["confianza"].isin(_hasta(nivel))]),
+                }
+            ]
+        )
+        partes.append(pd.concat([resumen, pares, total], ignore_index=True).assign(nivel=nivel))
+
+    tabla = pd.concat(partes, ignore_index=True) if partes else pd.DataFrame()
+    if tabla.empty:
+        return _tipar(tabla, COLUMNAS_COMPARTIDAS, _TIPOS_COMPARTIDAS)
+    tabla["pct_compartido"] = (
+        tabla["compartidos"].astype("float64") / tabla["anuncios"].astype("float64") * 100
+    ).round(1)
+    for columna in (
+        "diferencia_mediana_pct",
+        "diferencia_media_pct",
+        "pct_mas_cara",
+        "pct_mas_barata",
+        "pct_mismo_precio",
+    ):
+        tabla[columna] = tabla[columna].astype("float64").round(1)
+    tabla["semana"] = semana
+    tabla["orden"] = tabla["nivel"].map(NIVELES.index)
+    tabla = tabla.sort_values(["orden", "fuente", "otra"], kind="stable")
+    return _tipar(tabla, COLUMNAS_COMPARTIDAS, _TIPOS_COMPARTIDAS)

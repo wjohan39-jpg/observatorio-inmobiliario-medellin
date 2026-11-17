@@ -249,6 +249,7 @@ TABLAS_AGREGADAS: Final = (
     "cuota_zona",
     "perfil_inmobiliaria",
     "calidad_inmobiliaria",
+    "compartidas_inmobiliaria",
     "cobertura_inmobiliaria",
     "cobertura_comuna",
     "economia_inmobiliaria",

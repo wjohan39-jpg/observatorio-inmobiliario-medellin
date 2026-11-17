@@ -8,10 +8,12 @@ from observatorio_inmobiliario.agregados import (
     NIVELES,
     anuncios_unicos,
     base_analisis,
+    calidad_inmobiliaria,
     cobertura_comuna,
     cobertura_inmobiliaria,
     compartidos_fuentes,
     con_vivienda,
+    cuota_zona,
     distribucion_oferta,
     economia_inmobiliaria,
     estrato_inferido,
@@ -20,6 +22,7 @@ from observatorio_inmobiliario.agregados import (
     indice_relativo,
     mercado_precios,
     oferta_zona,
+    perfil_inmobiliaria,
     precios_zona,
 )
 from observatorio_inmobiliario.emparejamiento import Confianza, agrupar, emparejar
@@ -849,3 +852,123 @@ def test_distribucion_vacia(limpio: Any) -> None:
         "alcobas",
         "anuncios",
     ]
+
+
+# ------------------------------------------------------- Cuota, perfil y calidad
+
+
+def _de(fuente: str, n: int, **cambios: Any) -> list[dict[str, Any]]:
+    return [
+        fila(fuente=fuente, id_fuente=f"{fuente}-{i}-{len(cambios)}", **cambios) for i in range(n)
+    ]
+
+
+def _cuota_de(tabla: pd.DataFrame, nivel: str, codigo: str, operacion: str, fuente: str) -> int:
+    filas = tabla[
+        (tabla["nivel"] == nivel)
+        & (tabla["codigo"] == codigo)
+        & (tabla["operacion"] == operacion)
+        & (tabla["fuente"] == fuente)
+    ]
+    assert len(filas) == 1, (nivel, codigo, operacion, fuente, len(filas))
+    return int(filas["anuncios"].iloc[0])
+
+
+def test_cuota_zona_cuenta_por_inmobiliaria(limpio: Any) -> None:
+    filas = [
+        *_de("alnago", 3),
+        *_de("alnago", 2, operacion="venta"),
+        *_de("santafe", 1),
+        *_de("santafe", 1, codigo_barrio=None, barrio_normalizado=None),
+    ]
+    tabla = cuota_zona(base_analisis(limpio(*filas)), SEMANA)
+
+    assert _cuota_de(tabla, "ciudad", "ciudad", "todas", "alnago") == 5
+    assert _cuota_de(tabla, "ciudad", "ciudad", "todas", "santafe") == 2
+    assert _cuota_de(tabla, "barrio", "1101", "arriendo", "alnago") == 3
+    assert _cuota_de(tabla, "barrio", "1101", "todas", "alnago") == 5
+    assert _cuota_de(tabla, "barrio", "1101", "todas", "santafe") == 1  # el otro no tiene barrio
+    assert _cuota_de(tabla, "comuna", "11", "todas", "santafe") == 2
+    assert set(tabla["semana"]) == {SEMANA}
+
+
+def test_cuota_zona_sin_atipicos(limpio: Any) -> None:
+    filas = [*_de("alnago", 2), *_de("alnago", 1, es_atipico=True, precio=1)]
+    tabla = cuota_zona(base_analisis(limpio(*filas)), SEMANA)
+    assert _cuota_de(tabla, "ciudad", "ciudad", "todas", "alnago") == 2
+
+
+def test_cuota_zona_vacia(limpio: Any) -> None:
+    tabla = cuota_zona(base_analisis(limpio()), SEMANA)
+    assert tabla.empty
+    assert list(tabla.columns) == [
+        "semana",
+        "nivel",
+        "codigo",
+        "nombre",
+        "comuna",
+        "operacion",
+        "fuente",
+        "anuncios",
+    ]
+    assert str(tabla["anuncios"].dtype) == "Int64"
+
+
+def test_perfil_inmobiliaria(limpio: Any) -> None:
+    filas = [
+        *_de("alnago", 2),
+        *_de("alnago", 1, operacion="venta", tipo_normalizado="local"),
+        *_de("santafe", 1, operacion="venta", tipo_normalizado="casa"),
+    ]
+    tabla = perfil_inmobiliaria(base_analisis(limpio(*filas)), SEMANA)
+    celdas = {
+        (f, o, t): int(n)
+        for f, o, t, n in zip(
+            tabla["fuente"], tabla["operacion"], tabla["tipo"], tabla["anuncios"], strict=True
+        )
+    }
+    assert celdas == {
+        ("alnago", "arriendo", "apartamento"): 2,
+        ("alnago", "venta", "local"): 1,
+        ("santafe", "venta", "casa"): 1,
+    }
+    assert list(tabla.columns) == ["semana", "fuente", "operacion", "tipo", "anuncios"]
+
+
+def test_perfil_inmobiliaria_vacio(limpio: Any) -> None:
+    assert perfil_inmobiliaria(base_analisis(limpio()), SEMANA).empty
+
+
+def test_calidad_porcentajes_e_indice(limpio: Any) -> None:
+    filas = _de("alnago", 5, parqueaderos=1, estrato=None)
+    for f in filas[:2]:
+        f["habitaciones"] = None
+    filas[2].update(coordenadas_validas=False)
+    filas[3].update(codigo_barrio=None)
+    tabla = calidad_inmobiliaria(base_analisis(limpio(*filas)), SEMANA)
+
+    alnago = tabla.iloc[0]
+    assert len(tabla) == 1
+    assert alnago["anuncios"] == 5
+    assert alnago["pct_area"] == 100
+    assert alnago["pct_habitaciones"] == 60
+    assert alnago["pct_banos"] == 100
+    assert alnago["pct_parqueaderos"] == 100
+    assert alnago["pct_estrato"] == 0
+    assert alnago["pct_coordenadas"] == 80
+    assert alnago["pct_barrio"] == 80
+    assert alnago["indice_completitud"] == round((100 + 60 + 100 + 100 + 0 + 80 + 80) / 7)
+
+
+def test_calidad_solo_vivienda_y_minimo(limpio: Any) -> None:
+    pocos = calidad_inmobiliaria(base_analisis(limpio(*_de("alnago", 4))), SEMANA)
+    assert pocos.empty
+    locales = _de("alnago", 5, tipo_normalizado="local")
+    assert calidad_inmobiliaria(base_analisis(limpio(*locales)), SEMANA).empty
+
+
+def test_calidad_vacia(limpio: Any) -> None:
+    tabla = calidad_inmobiliaria(base_analisis(limpio()), SEMANA)
+    assert tabla.empty
+    assert list(tabla.columns)[:3] == ["semana", "fuente", "anuncios"]
+    assert tabla.columns[-1] == "indice_completitud"

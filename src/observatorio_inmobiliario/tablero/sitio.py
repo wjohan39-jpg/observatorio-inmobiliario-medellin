@@ -15,7 +15,7 @@ import plotly.graph_objects as go
 
 from observatorio_inmobiliario.reputacion import reconocimiento
 from observatorio_inmobiliario.tablero import graficas
-from observatorio_inmobiliario.tablero.formato import indicadores
+from observatorio_inmobiliario.tablero.formato import entero, indicadores
 
 REPOSITORIO: Final = "https://github.com/wjohan39-jpg/observatorio-inmobiliario-medellin"
 _ESTILO: Final = """
@@ -71,7 +71,7 @@ def _seccion(id_: str, titulo: str, contenido: list[str]) -> str:
 
 
 def generar_sitio(tablas: dict[str, pd.DataFrame], geojson: dict[str, Any], salida: Path) -> Path:
-    """Escribe ``salida/index.html`` con las 8 secciones del dashboard y devuelve su ruta."""
+    """Escribe ``salida/index.html`` con las 9 secciones del dashboard y devuelve su ruta."""
     figura = _Graficas()
     cobertura = tablas["cobertura_inmobiliaria"]
     semana = str(cobertura["semana"].iloc[0]) if not cobertura.empty else "sin datos"
@@ -185,6 +185,48 @@ def generar_sitio(tablas: dict[str, pd.DataFrame], geojson: dict[str, Any], sali
             "necesariamente que se vendió o se arrendó.</p>",
         ],
     )
+    cuota, perfil = tablas["cuota_zona"], tablas["perfil_inmobiliaria"]
+    calidad, estratos = tablas["calidad_inmobiliaria"], tablas["estratos_inmobiliaria"]
+    hhi_barrios = graficas.tabla_hhi(cuota, "barrio", "todas")
+    cuota_agencias = _seccion(
+        "cuota",
+        "Cuota y perfil",
+        [
+            "<p>La cuota es la del <b>inventario observado en las 9 inmobiliarias</b>, no la "
+            "del mercado: faltan otras inmobiliarias y los particulares. Una propiedad "
+            "publicada por varias inmobiliarias cuenta en cada una.</p>",
+            "<h3>Cuota de inventario</h3>",
+            figura(graficas.cuota_total(cuota, "todas")),
+            figura(graficas.cuota_total(cuota, "venta")),
+            figura(graficas.cuota_total(cuota, "arriendo")),
+            figura(graficas.cuota_zonas(cuota, "barrio", "todas")),
+            figura(graficas.cuota_zonas(cuota, "comuna", "todas")),
+            "<p>Solo los anuncios con barrio o comuna reconocidos cuentan por zona, y varía "
+            "mucho por inmobiliaria: las que casi no traen ubicación aparecen "
+            "subrepresentadas.</p>",
+            "<h3>Concentración: índice HHI</h3>",
+            "<p>Suma de los cuadrados de las cuotas (en %), de 0 a 10.000. Menos de "
+            f"{entero(graficas.UMBRALES_HHI[0])} es poco concentrado y más de "
+            f"{entero(graficas.UMBRALES_HHI[1])}, muy concentrado. Solo en zonas con "
+            f"{graficas.MINIMO_HHI} anuncios o más.</p>",
+            figura(graficas.concentracion_hhi(cuota, "barrio", "todas")),
+            figura(graficas.concentracion_hhi(cuota, "comuna", "todas")),
+            "<h4>Barrios</h4>",
+            _tabla(hhi_barrios),
+            "<h4>Comunas</h4>",
+            _tabla(graficas.tabla_hhi(cuota, "comuna", "todas")),
+            "<h3>Perfil: en qué se especializa cada inmobiliaria</h3>",
+            _tabla(graficas.tabla_perfil(perfil, estratos)),
+            figura(graficas.perfil_operacion(perfil)),
+            figura(graficas.perfil_tipos(perfil, "venta")),
+            figura(graficas.perfil_tipos(perfil, "arriendo")),
+            "<h3>Calidad de los datos</h3>",
+            figura(graficas.calidad_datos(calidad)),
+            _tabla(graficas.tabla_calidad(calidad)),
+            "<p>Porcentaje de los anuncios de vivienda que trae cada dato. Fotos y "
+            "descripciones no se miden porque el proyecto no las guarda.</p>",
+        ],
+    )
     indice = reconocimiento(cobertura, None)
     inmobiliarias = _seccion(
         "inmobiliarias",
@@ -267,12 +309,12 @@ Datos de la semana <b>{escape(semana)}</b>.</div>
 </header>
 <nav>
 <a href="#resumen">Resumen</a><a href="#barrios">Barrios</a><a href="#precios">Precios</a>
-<a href="#oferta">Oferta</a>
+<a href="#oferta">Oferta</a><a href="#cuota">Cuota</a>
 <a href="#inmobiliarias">Inmobiliarias</a><a href="#compartidos">Compartidas</a>
 <a href="#evolucion">Evolución</a><a href="#metodologia">Metodología</a>
 </nav>
 <main>
-{resumen}{barrios}{analisis}{movimiento}{inmobiliarias}{compartidos}{evolucion}{metodologia}
+{resumen}{barrios}{analisis}{movimiento}{cuota_agencias}{inmobiliarias}{compartidos}{evolucion}{metodologia}
 </main>
 <footer>Generado a partir de <code>data/agregados/</code> ·
 <a href="{REPOSITORIO}">Código en GitHub</a></footer>

@@ -689,15 +689,16 @@ def _contar_zona(
     nivel: str,
     codigo: pd.Series,
     nombre: pd.Series,
+    por: str = "tipo",
 ) -> pd.DataFrame:
-    """Anuncios de ``datos`` por zona, operación y tipo, con las columnas de la tabla."""
+    """Anuncios de ``datos`` por zona, operación y la columna ``por`` (``tipo`` o ``fuente``)."""
     zonas = pd.DataFrame(
         {
             "codigo": codigo.astype("string"),
             "nombre": nombre.astype("string"),
             "comuna": datos["comuna"].astype("string"),
             "operacion": datos["operacion"].astype("string"),
-            "tipo": datos["tipo"].astype("string"),
+            por: datos[por].astype("string"),
         }
     )
     cuenta = zonas.groupby(list(zonas.columns), observed=True, dropna=False).size()
@@ -781,3 +782,137 @@ def distribucion_oferta(base: pd.DataFrame, semana: str) -> pd.DataFrame:
     tabla["anuncios"] = tabla["anuncios"].astype("Int64")
     orden = tabla.sort_values(["operacion", "tipo", "rango_precio", "alcobas"], kind="stable")
     return orden[COLUMNAS_DISTRIBUCION].reset_index(drop=True)
+
+
+# ------------------------------------------------------- Cuota, perfil y calidad
+
+COLUMNAS_CUOTA_ZONA: Final = [
+    "semana",
+    "nivel",
+    "codigo",
+    "nombre",
+    "comuna",
+    "operacion",
+    "fuente",
+    "anuncios",
+]
+_TEXTO_CUOTA_ZONA: Final = COLUMNAS_CUOTA_ZONA[:7]
+COLUMNAS_PERFIL: Final = ["semana", "fuente", "operacion", "tipo", "anuncios"]
+_TEXTO_PERFIL: Final = COLUMNAS_PERFIL[:4]
+CAMPOS_CALIDAD: Final = {
+    "pct_area": "area_m2",
+    "pct_habitaciones": "habitaciones",
+    "pct_banos": "banos",
+    "pct_parqueaderos": "parqueaderos",
+    "pct_estrato": "estrato",
+    "pct_coordenadas": "coordenadas_validas",
+    "pct_barrio": "codigo_barrio",
+}
+"""Campos de calidad de los datos y la columna de la base de la que salen."""
+COLUMNAS_CALIDAD: Final = [
+    "semana",
+    "fuente",
+    "anuncios",
+    *CAMPOS_CALIDAD,
+    "indice_completitud",
+]
+_TEXTO_CALIDAD: Final = COLUMNAS_CALIDAD[:2]
+
+
+def cuota_zona(base: pd.DataFrame, semana: str) -> pd.DataFrame:
+    """Anuncios de cada inmobiliaria por zona y operación: la base de la cuota y del HHI.
+
+    Una fila por nivel (``"ciudad"``, ``"comuna"`` o ``"barrio"``), zona, operación (``venta``,
+    ``arriendo`` y ``todas``) e inmobiliaria. Son conteos del inventario **observado** en las
+    inmobiliarias que se scrapean, sin los anuncios atípicos: no es el mercado completo, y una
+    propiedad publicada por varias inmobiliarias cuenta una vez en cada una. Los anuncios sin
+    barrio cuentan en su comuna, y los que no tienen comuna, solo en la ciudad.
+    """
+    datos = _con_todas(base)
+    if datos.empty:
+        return _vacia(COLUMNAS_CUOTA_ZONA, _TEXTO_CUOTA_ZONA)
+    ciudad = pd.Series(NIVEL_CIUDAD, index=datos.index, dtype="string")
+    con_comuna = datos[datos["comuna"].notna()]
+    con_barrio = datos[datos["codigo_barrio"].notna()]
+    partes = [
+        _contar_zona(
+            datos.assign(comuna=ciudad.map(lambda _: pd.NA)),
+            NIVEL_CIUDAD,
+            ciudad,
+            ciudad,
+            "fuente",
+        ),
+        _contar_zona(
+            con_comuna, "comuna", con_comuna["comuna"], con_comuna["nombre_comuna"], "fuente"
+        ),
+        _contar_zona(
+            con_barrio,
+            "barrio",
+            con_barrio["codigo_barrio"],
+            con_barrio["barrio_normalizado"],
+            "fuente",
+        ),
+    ]
+    tabla = pd.concat(partes, ignore_index=True).assign(semana=semana)
+    tabla = tabla.astype({c: "string" for c in _TEXTO_CUOTA_ZONA})
+    tabla["anuncios"] = tabla["anuncios"].astype("Int64")
+    orden = tabla.sort_values(["nivel", "codigo", "operacion", "fuente"], kind="stable")
+    return orden[COLUMNAS_CUOTA_ZONA].reset_index(drop=True)
+
+
+def perfil_inmobiliaria(base: pd.DataFrame, semana: str) -> pd.DataFrame:
+    """Anuncios de cada inmobiliaria por operación y tipo de inmueble (en qué se especializa).
+
+    Incluye todos los tipos, no solo vivienda. El estrato está en ``estratos_inmobiliaria``.
+    """
+    datos = base[base["tipo_normalizado"].notna()]
+    if datos.empty:
+        return _vacia(COLUMNAS_PERFIL, _TEXTO_PERFIL)
+    claves = pd.DataFrame(
+        {
+            "fuente": datos["fuente"].astype("string"),
+            "operacion": datos["operacion"].astype("string"),
+            "tipo": datos["tipo_normalizado"].astype("string"),
+        }
+    )
+    cuenta = claves.groupby(list(claves.columns), observed=True).size()
+    tabla = cuenta.rename("anuncios").reset_index().assign(semana=semana)
+    tabla = tabla.astype({c: "string" for c in _TEXTO_PERFIL})
+    tabla["anuncios"] = tabla["anuncios"].astype("Int64")
+    orden = tabla.sort_values(["fuente", "operacion", "tipo"], kind="stable")
+    return orden[COLUMNAS_PERFIL].reset_index(drop=True)
+
+
+def calidad_inmobiliaria(base: pd.DataFrame, semana: str) -> pd.DataFrame:
+    """Qué % de los anuncios de vivienda de cada inmobiliaria trae cada dato.
+
+    Solo vivienda, para que alcobas, baños y parqueaderos apliquen a todos los anuncios; con
+    al menos :data:`MINIMO_PUBLICACION` anuncios. ``pct_coordenadas`` cuenta las coordenadas
+    válidas y ``pct_estrato`` el estrato **declarado** (algunas fuentes no lo publican).
+    ``indice_completitud`` es el promedio de los siete porcentajes. Fotos y descripciones no se
+    miden: el proyecto no las guarda.
+    """
+    es_vivienda = base["tipo_normalizado"].isin(TIPOS_VIVIENDA).fillna(False).astype(bool)
+    vivienda = base[es_vivienda]
+    if vivienda.empty:
+        return _vacia(COLUMNAS_CALIDAD, _TEXTO_CALIDAD)
+    presentes = pd.DataFrame(
+        {
+            nombre: vivienda[columna].fillna(False).astype(bool)
+            if columna == "coordenadas_validas"
+            else vivienda[columna].notna()
+            for nombre, columna in CAMPOS_CALIDAD.items()
+        }
+    ).assign(fuente=vivienda["fuente"].astype("string"))
+    grupos = presentes.groupby("fuente", observed=True)
+    tabla = (grupos[list(CAMPOS_CALIDAD)].mean() * 100).assign(anuncios=grupos.size())
+    tabla = tabla[tabla["anuncios"] >= MINIMO_PUBLICACION]
+    if tabla.empty:
+        return _vacia(COLUMNAS_CALIDAD, _TEXTO_CALIDAD)
+    tabla["indice_completitud"] = tabla[list(CAMPOS_CALIDAD)].mean(axis=1)
+    tabla = _enteros(
+        tabla.reset_index().assign(semana=semana), [*CAMPOS_CALIDAD, "indice_completitud"]
+    )
+    tabla["anuncios"] = tabla["anuncios"].astype("Int64")
+    tabla = tabla.astype({c: "string" for c in _TEXTO_CALIDAD})
+    return tabla.sort_values("fuente", kind="stable")[COLUMNAS_CALIDAD].reset_index(drop=True)

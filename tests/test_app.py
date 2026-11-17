@@ -79,6 +79,7 @@ def test_inmobiliarias_con_reputacion_falsa(monkeypatch: pytest.MonkeyPatch) -> 
 PAGINAS_2 = [
     "pages/7_Análisis_de_precios.py",
     "pages/8_Oferta_y_rotación.py",
+    "pages/9_Cuota_y_perfil.py",
     "pages/4_Propiedades_compartidas.py",
     "pages/5_Evolución.py",
     "pages/6_Metodología.py",
@@ -115,6 +116,25 @@ def test_oferta_cambia_selectores() -> None:
 
 def test_oferta_sin_columnas_privadas() -> None:
     app = _correr("pages/8_Oferta_y_rotación.py")
+    assert app.dataframe
+    for tabla in app.dataframe:
+        columnas = {str(c).lower() for c in tabla.value.columns}
+        assert not columnas & {"id_fuente", "url", "latitud", "longitud"}
+
+
+def test_cuota_cambia_selectores() -> None:
+    app = _correr("pages/9_Cuota_y_perfil.py")
+    app.radio(key="operacion_cuota").set_value("venta").run()
+    assert not app.exception
+    app.radio(key="nivel_cuota").set_value("comuna").run()
+    assert not app.exception
+    zonas = app.selectbox(key="zona_cuota").options
+    app.selectbox(key="zona_cuota").set_value(zonas[-1]).run()
+    assert not app.exception
+
+
+def test_cuota_sin_columnas_privadas() -> None:
+    app = _correr("pages/9_Cuota_y_perfil.py")
     assert app.dataframe
     for tabla in app.dataframe:
         columnas = {str(c).lower() for c in tabla.value.columns}

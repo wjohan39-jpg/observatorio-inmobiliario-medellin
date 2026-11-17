@@ -924,3 +924,332 @@ def tabla_rotacion_semana(rotacion: pd.DataFrame) -> pd.DataFrame:
             "tasa_retiro_pct": "Tasa de retiro (%)",
         }
     )
+
+
+# ------------------------------------------------------- Cuota, perfil y calidad
+
+MINIMO_HHI: Final = 20
+"""Anuncios que debe tener una zona para calcular su HHI."""
+UMBRALES_HHI: Final = (1_500, 2_500)
+"""Límites orientativos del HHI: por debajo del primero, el inventario está poco concentrado;
+entre los dos, moderadamente; por encima del segundo, muy concentrado."""
+LECTURAS_HHI: Final = ("Poco concentrado", "Moderado", "Muy concentrado")
+_TIPOS_PERFIL: Final = ("apartamento", "apartaestudio", "casa", "local", "oficina", "bodega")
+_ETIQUETAS_CALIDAD: Final = {
+    "pct_area": "Área",
+    "pct_habitaciones": "Alcobas",
+    "pct_banos": "Baños",
+    "pct_parqueaderos": "Parqueaderos",
+    "pct_estrato": "Estrato",
+    "pct_coordenadas": "Coordenadas",
+    "pct_barrio": "Barrio oficial",
+}
+
+
+def _cuota(cuota: pd.DataFrame, nivel: str, operacion: str) -> pd.DataFrame:
+    """Anuncios por zona e inmobiliaria con la cuota (%) de cada una dentro de su zona."""
+    filas = cuota[(cuota["nivel"] == nivel) & (cuota["operacion"] == operacion)]
+    filas = filas.assign(anuncios=filas["anuncios"].astype("int64"))
+    total = filas.groupby("codigo")["anuncios"].transform("sum")
+    return filas.assign(total=total, cuota=filas["anuncios"] / total * 100)
+
+
+def cuota_total(cuota: pd.DataFrame, operacion: str) -> go.Figure:
+    """Cuota del inventario de cada inmobiliaria en toda la ciudad."""
+    etiqueta = "venta y arriendo" if operacion == "todas" else operacion
+    titulo = f"Cuota del inventario por inmobiliaria ({etiqueta})"
+    filas = _cuota(cuota, NIVEL_CIUDAD, operacion).sort_values("cuota")
+    if filas.empty:
+        return _sin_datos(titulo)
+    figura = px.bar(
+        filas,
+        x="cuota",
+        y="fuente",
+        orientation="h",
+        color="fuente",
+        color_discrete_map=COLORES_FUENTE,
+        hover_data={"anuncios": True, "cuota": ":.1f", "fuente": False},
+        labels={"cuota": "Cuota del inventario (%)", "fuente": "", "anuncios": "Anuncios"},
+        template=_PLANTILLA,
+    )
+    figura.update_layout(title=titulo, showlegend=False)
+    return figura
+
+
+def zonas_de_cuota(cuota: pd.DataFrame, nivel: str, operacion: str) -> pd.DataFrame:
+    """Las zonas con anuncios, de la que más tiene a la que menos: ``codigo``, ``nombre``…"""
+    filas = _cuota(cuota, nivel, operacion)
+    if filas.empty:
+        return pd.DataFrame(columns=["codigo", "nombre", "total"])
+    zonas = filas.drop_duplicates("codigo")[["codigo", "nombre", "total"]]
+    return zonas.sort_values("total", ascending=False).reset_index(drop=True)
+
+
+def cuota_zonas(cuota: pd.DataFrame, nivel: str, operacion: str, cuantos: int = 15) -> go.Figure:
+    """Cuota de cada inmobiliaria en las ``cuantos`` zonas con más inventario."""
+    titulo = f"Cuota por inmobiliaria en los {cuantos} {nivel}s con más inventario"
+    zonas = zonas_de_cuota(cuota, nivel, operacion).head(cuantos)
+    if zonas.empty:
+        return _sin_datos(titulo)
+    filas = _cuota(cuota, nivel, operacion)
+    filas = filas[filas["codigo"].isin(zonas["codigo"])]
+    filas = filas.assign(nombre=filas["nombre"].astype(str).str.title())
+    orden = zonas["nombre"].astype(str).str.title().tolist()[::-1]
+    figura = px.bar(
+        filas,
+        x="cuota",
+        y="nombre",
+        color="fuente",
+        orientation="h",
+        category_orders={"nombre": orden},
+        color_discrete_map=COLORES_FUENTE,
+        hover_data={"anuncios": True, "cuota": ":.1f"},
+        labels={"cuota": "Cuota (%)", "nombre": nivel.title(), "fuente": "Inmobiliaria"},
+        template=_PLANTILLA,
+    )
+    figura.update_layout(title=titulo, height=max(400, 28 * len(zonas)))
+    return figura
+
+
+def tabla_cuota(cuota: pd.DataFrame, nivel: str, operacion: str, codigo: str) -> pd.DataFrame:
+    """La cuota de cada inmobiliaria en una zona, de la mayor a la menor."""
+    filas = _cuota(cuota, nivel, operacion)
+    filas = filas[filas["codigo"] == codigo].sort_values("anuncios", ascending=False)
+    if filas.empty:
+        return pd.DataFrame()
+    tabla = filas[["fuente", "anuncios", "cuota"]].assign(cuota=filas["cuota"].round(1))
+    return tabla.rename(
+        columns={"fuente": "Inmobiliaria", "anuncios": "Anuncios", "cuota": "Cuota (%)"}
+    )
+
+
+def _lectura_hhi(hhi: float) -> str:
+    bajo, alto = UMBRALES_HHI
+    if hhi > alto:
+        return LECTURAS_HHI[2]
+    return LECTURAS_HHI[1] if hhi >= bajo else LECTURAS_HHI[0]
+
+
+def hhi_zonas(cuota: pd.DataFrame, nivel: str, operacion: str) -> pd.DataFrame:
+    """Índice Herfindahl-Hirschman del inventario de cada zona, de 0 a 10.000.
+
+    Es la suma de los cuadrados de las cuotas (en %). Solo se calcula en zonas con
+    :data:`MINIMO_HHI` anuncios o más: en una zona con pocos anuncios el índice sale alto
+    solo por el tamaño de la muestra.
+    """
+    columnas = ["codigo", "nombre", "comuna", "anuncios", "inmobiliarias", "hhi", "lectura"]
+    filas = _cuota(cuota, nivel, operacion)
+    filas = filas[filas["total"] >= MINIMO_HHI]
+    if filas.empty:
+        return pd.DataFrame(columns=[*columnas, "lider", "cuota_lider"])
+    grupos = filas.assign(cuadrado=filas["cuota"] ** 2).groupby("codigo")
+    tabla = pd.DataFrame(
+        {
+            "anuncios": grupos["anuncios"].sum(),
+            "inmobiliarias": grupos.size(),
+            "hhi": grupos["cuadrado"].sum().round(0),
+        }
+    )
+    lider = filas.sort_values(["codigo", "anuncios", "fuente"], ascending=[True, False, True])
+    lider = lider.drop_duplicates("codigo").set_index("codigo")
+    zonas = filas.drop_duplicates("codigo").set_index("codigo")
+    tabla["nombre"] = zonas["nombre"].reindex(tabla.index)
+    tabla["comuna"] = zonas["comuna"].reindex(tabla.index)
+    tabla["lider"] = lider["fuente"].reindex(tabla.index)
+    tabla["cuota_lider"] = lider["cuota"].reindex(tabla.index).round(1)
+    tabla["lectura"] = tabla["hhi"].map(_lectura_hhi)
+    return tabla.reset_index().sort_values("hhi", ascending=False).reset_index(drop=True)
+
+
+def concentracion_hhi(cuota: pd.DataFrame, nivel: str, operacion: str) -> go.Figure:
+    """Cuántas zonas hay en cada nivel de concentración, con el HHI de cada una."""
+    titulo = f"HHI del inventario por {nivel} ({operacion})"
+    tabla = hhi_zonas(cuota, nivel, operacion)
+    if tabla.empty:
+        return _sin_datos(titulo)
+    figura = px.histogram(
+        tabla,
+        x="hhi",
+        nbins=25,
+        labels={"hhi": "HHI (0 a 10.000)", "count": "Zonas"},
+        template=_PLANTILLA,
+    )
+    for limite in UMBRALES_HHI:
+        figura.add_vline(x=limite, line_dash="dot")
+    figura.update_layout(title=titulo, yaxis_title="Zonas")
+    return figura
+
+
+def hhi_ciudad(cuota: pd.DataFrame, operacion: str) -> int | None:
+    """HHI del inventario de toda la ciudad, o ``None`` sin datos."""
+    tabla = hhi_zonas(cuota, NIVEL_CIUDAD, operacion)
+    return None if tabla.empty else int(tabla["hhi"].iloc[0])
+
+
+def _perfil(perfil: pd.DataFrame, operacion: str | None = None) -> pd.DataFrame:
+    filas = perfil if operacion is None else perfil[perfil["operacion"] == operacion]
+    filas = filas.assign(anuncios=filas["anuncios"].astype("int64"))
+    # Los tipos poco frecuentes se agrupan para que la gráfica se pueda leer.
+    tipo = filas["tipo"].astype(str).where(filas["tipo"].isin(_TIPOS_PERFIL), "otros")
+    return filas.assign(tipo=tipo)
+
+
+def perfil_tipos(perfil: pd.DataFrame, operacion: str) -> go.Figure:
+    """De qué tipos de inmueble se compone el inventario de cada inmobiliaria."""
+    titulo = f"Tipos de inmueble por inmobiliaria ({operacion})"
+    filas = _perfil(perfil, operacion)
+    if filas.empty:
+        return _sin_datos(titulo)
+    tabla = filas.groupby(["fuente", "tipo"], as_index=False)["anuncios"].sum()
+    tabla["pct"] = tabla["anuncios"] / tabla.groupby("fuente")["anuncios"].transform("sum") * 100
+    figura = px.bar(
+        tabla,
+        x="pct",
+        y="fuente",
+        color="tipo",
+        orientation="h",
+        category_orders={"tipo": [*_TIPOS_PERFIL, "otros"]},
+        hover_data={"anuncios": True, "pct": ":.1f"},
+        labels={"pct": "% de sus anuncios", "fuente": "", "tipo": "Tipo"},
+        template=_PLANTILLA,
+    )
+    figura.update_layout(title=titulo)
+    return figura
+
+
+def perfil_operacion(perfil: pd.DataFrame) -> go.Figure:
+    """Qué parte del inventario de cada inmobiliaria es venta y cuál es arriendo."""
+    titulo = "Venta y arriendo en el inventario de cada inmobiliaria"
+    filas = _perfil(perfil)
+    if filas.empty:
+        return _sin_datos(titulo)
+    tabla = filas.groupby(["fuente", "operacion"], as_index=False)["anuncios"].sum()
+    tabla["pct"] = tabla["anuncios"] / tabla.groupby("fuente")["anuncios"].transform("sum") * 100
+    figura = px.bar(
+        tabla,
+        x="pct",
+        y="fuente",
+        color="operacion",
+        orientation="h",
+        category_orders={"operacion": ["venta", "arriendo"]},
+        hover_data={"anuncios": True, "pct": ":.1f"},
+        labels={"pct": "% de sus anuncios", "fuente": "", "operacion": "Operación"},
+        template=_PLANTILLA,
+    )
+    figura.update_layout(title=titulo)
+    return figura
+
+
+def tabla_perfil(perfil: pd.DataFrame, estratos: pd.DataFrame) -> pd.DataFrame:
+    """En una fila, la especialización de cada inmobiliaria: operación, tipo y estrato.
+
+    El estrato principal sale de ``estratos``, que puede ser de otra semana: una inmobiliaria
+    que no aparece allí muestra «Sin datos», distinto de «No declara» (no publica estrato).
+    """
+    if perfil.empty:
+        return pd.DataFrame()
+    filas = _perfil(perfil)
+    total = filas.groupby("fuente")["anuncios"].sum().to_dict()
+    venta = filas[filas["operacion"] == "venta"].groupby("fuente")["anuncios"].sum().to_dict()
+    tipos: dict[str, dict[str, int]] = {}
+    conteo = filas.groupby(["fuente", "tipo"], as_index=False)["anuncios"].sum()
+    for fuente, tipo, n in zip(conteo["fuente"], conteo["tipo"], conteo["anuncios"], strict=True):
+        tipos.setdefault(str(fuente), {})[str(tipo)] = int(n)
+    por_estrato: dict[str, dict[str, int]] = {}
+    if not estratos.empty:
+        declarados = estratos.assign(declarados=estratos["declarados"].astype("int64"))
+        conteo = declarados.groupby(["fuente", "estrato"], as_index=False)["declarados"].sum()
+        for fuente, estrato, n in zip(
+            conteo["fuente"], conteo["estrato"], conteo["declarados"], strict=True
+        ):
+            por_estrato.setdefault(str(fuente), {})[str(estrato)] = int(n)
+
+    resultado = []
+    for fuente, anuncios in total.items():
+        principal, n_principal = max(tipos[str(fuente)].items(), key=lambda par: par[1])
+        if str(fuente) not in por_estrato:
+            estrato = "Sin datos"
+        elif sum(por_estrato[str(fuente)].values()) == 0:
+            estrato = "No declara"
+        else:
+            suma = sum(por_estrato[str(fuente)].values())
+            mejor, n_mejor = max(por_estrato[str(fuente)].items(), key=lambda par: par[1])
+            estrato = f"{mejor} ({n_mejor / suma:.0%})"
+        resultado.append(
+            {
+                "Inmobiliaria": fuente,
+                "Anuncios": int(anuncios),
+                "Venta (%)": round(venta.get(fuente, 0) / anuncios * 100),
+                "Tipo principal": f"{principal} ({n_principal / anuncios:.0%})",
+                "Estrato principal (declarado)": estrato,
+            }
+        )
+    return pd.DataFrame(resultado).sort_values("Anuncios", ascending=False, ignore_index=True)
+
+
+def calidad_datos(calidad: pd.DataFrame) -> go.Figure:
+    """Mapa de calor: qué % de los anuncios de vivienda de cada inmobiliaria trae cada dato."""
+    titulo = "Completitud de los datos de vivienda por inmobiliaria (%)"
+    if calidad.empty:
+        return _sin_datos(titulo)
+    ordenada = calidad.assign(
+        **{c: calidad[c].astype("float64") for c in [*_ETIQUETAS_CALIDAD, "indice_completitud"]}
+    ).sort_values("indice_completitud")
+    tabla = ordenada.set_index("fuente")[list(_ETIQUETAS_CALIDAD)].rename(
+        columns=_ETIQUETAS_CALIDAD
+    )
+    figura = px.imshow(
+        tabla,
+        text_auto=True,
+        aspect="auto",
+        color_continuous_scale="RdYlGn",
+        zmin=0,
+        zmax=100,
+        labels={"x": "", "y": "", "color": "%"},
+    )
+    figura.update_layout(title=titulo, template=_PLANTILLA)
+    return figura
+
+
+def tabla_calidad(calidad: pd.DataFrame) -> pd.DataFrame:
+    """La completitud de cada inmobiliaria, de la más completa a la menos completa."""
+    if calidad.empty:
+        return pd.DataFrame()
+    tabla = calidad.assign(anuncios=calidad["anuncios"].astype("int64")).sort_values(
+        "indice_completitud", ascending=False
+    )
+    tabla = tabla.drop(columns="semana").astype(
+        {c: "int64" for c in [*_ETIQUETAS_CALIDAD, "indice_completitud"]}
+    )
+    return tabla.rename(
+        columns={
+            "fuente": "Inmobiliaria",
+            "anuncios": "Anuncios de vivienda",
+            "indice_completitud": "Índice de completitud",
+            **{k: f"{v} (%)" for k, v in _ETIQUETAS_CALIDAD.items()},
+        }
+    ).reset_index(drop=True)
+
+
+def tabla_hhi(cuota: pd.DataFrame, nivel: str, operacion: str) -> pd.DataFrame:
+    """Las zonas con su HHI, de la más a la menos concentrada, y quién lidera cada una."""
+    tabla = hhi_zonas(cuota, nivel, operacion)
+    if tabla.empty:
+        return pd.DataFrame()
+    tabla = tabla.assign(
+        nombre=tabla["nombre"].astype(str).str.title(), hhi=tabla["hhi"].astype("int64")
+    )
+    return tabla[
+        ["nombre", "comuna", "anuncios", "inmobiliarias", "hhi", "lectura", "lider", "cuota_lider"]
+    ].rename(
+        columns={
+            "nombre": "Zona",
+            "comuna": "Comuna",
+            "anuncios": "Anuncios",
+            "inmobiliarias": "Inmobiliarias",
+            "hhi": "HHI",
+            "lectura": "Lectura",
+            "lider": "Líder",
+            "cuota_lider": "Cuota del líder (%)",
+        }
+    )

@@ -125,6 +125,12 @@ def _llamadas(tablas: dict[str, pd.DataFrame]) -> list[go.Figure]:
         graficas.distribucion_alcobas(tablas["distribucion_oferta"], "arriendo", "vivienda"),
         graficas.precio_y_alcobas(tablas["distribucion_oferta"], "venta", "vivienda"),
         graficas.nuevos_y_retirados(tablas["rotacion_inmobiliaria"]),
+        graficas.cuota_total(tablas["cuota_zona"], "todas"),
+        graficas.cuota_zonas(tablas["cuota_zona"], "barrio", "venta"),
+        graficas.concentracion_hhi(tablas["cuota_zona"], "comuna", "todas"),
+        graficas.perfil_tipos(tablas["perfil_inmobiliaria"], "venta"),
+        graficas.perfil_operacion(tablas["perfil_inmobiliaria"]),
+        graficas.calidad_datos(tablas["calidad_inmobiliaria"]),
     ]
 
 
@@ -277,6 +283,129 @@ def test_rotacion_sin_comparacion(vacias: dict[str, pd.DataFrame]) -> None:
     assert graficas.tabla_rotacion_semana(primera).empty
     assert graficas.nuevos_y_retirados(primera).layout.title.text
     assert graficas.tabla_rotacion_semana(vacias["rotacion_inmobiliaria"]).empty
+
+
+def _cuota_sintetica() -> pd.DataFrame:
+    """Cuatro zonas de ciudad con HHI conocidos: 5.000, 2.500, 1.000 y una con pocos anuncios."""
+    zonas = {
+        "Z1": {"a": 15, "b": 15},
+        "Z2": {"a": 10, "b": 10, "c": 10, "d": 10},
+        "Z3": {f"f{i}": 3 for i in range(10)},
+        "Z4": {"a": 6, "b": 4},
+    }
+    filas = [
+        {
+            "nivel": "barrio",
+            "codigo": zona,
+            "nombre": zona.lower(),
+            "comuna": "01",
+            "operacion": "todas",
+            "fuente": fuente,
+            "anuncios": n,
+        }
+        for zona, fuentes in zonas.items()
+        for fuente, n in fuentes.items()
+    ]
+    return pd.DataFrame(filas).astype({"anuncios": "Int64"})
+
+
+def test_hhi_zonas_formula() -> None:
+    tabla = graficas.hhi_zonas(_cuota_sintetica(), "barrio", "todas").set_index("codigo")
+    assert tabla.loc["Z1", "hhi"] == 5_000
+    assert tabla.loc["Z2", "hhi"] == 2_500
+    assert tabla.loc["Z3", "hhi"] == 1_000
+    assert "Z4" not in tabla.index  # menos anuncios que el mínimo para calcular el HHI
+    assert tabla.loc["Z1", "lectura"] == "Muy concentrado"
+    assert tabla.loc["Z2", "lectura"] == "Moderado"  # 2.500 no supera el límite
+    assert tabla.loc["Z3", "lectura"] == "Poco concentrado"
+    assert tabla.loc["Z1", "lider"] == "a"  # empate: gana la de nombre menor
+    assert tabla.loc["Z1", "cuota_lider"] == 50
+    assert tabla.loc["Z3", "inmobiliarias"] == 10
+    assert list(tabla["hhi"]) == sorted(tabla["hhi"], reverse=True)
+
+
+def test_hhi_zonas_reales(reales: dict[str, pd.DataFrame]) -> None:
+    tabla = graficas.hhi_zonas(reales["cuota_zona"], "barrio", "todas")
+    assert not tabla.empty
+    assert (tabla["anuncios"] >= graficas.MINIMO_HHI).all()
+    assert tabla["hhi"].between(0, 10_000).all()
+    # El HHI mínimo posible con n inmobiliarias es 10.000 / n (todas con la misma cuota).
+    assert (tabla["hhi"] >= 10_000 / tabla["inmobiliarias"] - 1).all()
+    assert graficas.hhi_ciudad(reales["cuota_zona"], "todas") is not None
+
+
+def test_hhi_vacio(vacias: dict[str, pd.DataFrame]) -> None:
+    assert graficas.hhi_zonas(vacias["cuota_zona"], "barrio", "todas").empty
+    assert graficas.tabla_hhi(vacias["cuota_zona"], "barrio", "todas").empty
+    assert graficas.hhi_ciudad(vacias["cuota_zona"], "todas") is None
+
+
+def test_cuota_suma_cien(reales: dict[str, pd.DataFrame]) -> None:
+    cuota = reales["cuota_zona"]
+    zonas = graficas.zonas_de_cuota(cuota, "barrio", "todas")
+    tabla = graficas.tabla_cuota(cuota, "barrio", "todas", str(zonas["codigo"].iloc[0]))
+    assert tabla["Cuota (%)"].sum() == pytest.approx(100, abs=0.5)
+    assert tabla["Anuncios"].is_monotonic_decreasing
+    figura = graficas.cuota_total(cuota, "venta")
+    assert sum(v for traza in figura.data for v in traza.x) == pytest.approx(100)
+
+
+def test_cuota_zonas_cuantos(reales: dict[str, pd.DataFrame]) -> None:
+    figura = graficas.cuota_zonas(reales["cuota_zona"], "barrio", "todas", cuantos=10)
+    nombres = {y for traza in figura.data for y in traza.y}
+    assert len(nombres) == 10
+
+
+def test_tabla_perfil_distingue_sin_datos_de_no_declara() -> None:
+    perfil = pd.DataFrame(
+        {
+            "fuente": ["a", "a", "b", "c"],
+            "operacion": ["venta", "arriendo", "arriendo", "venta"],
+            "tipo": ["apartamento", "apartamento", "local", "casa"],
+            "anuncios": [30, 10, 20, 5],
+        }
+    ).astype({"anuncios": "Int64"})
+    estratos = pd.DataFrame(
+        {
+            "fuente": ["a", "a", "b"],
+            "operacion": ["venta", "venta", "arriendo"],
+            "estrato": ["3", "4", "3"],
+            "declarados": [6, 2, 0],
+            "inferidos": [0, 0, 20],
+        }
+    ).astype({"declarados": "Int64", "inferidos": "Int64"})
+    tabla = graficas.tabla_perfil(perfil, estratos).set_index("Inmobiliaria")
+    assert tabla.loc["a", "Anuncios"] == 40
+    assert tabla.loc["a", "Venta (%)"] == 75
+    assert tabla.loc["a", "Tipo principal"] == "apartamento (100%)"
+    assert tabla.loc["a", "Estrato principal (declarado)"] == "3 (75%)"
+    assert tabla.loc["b", "Estrato principal (declarado)"] == "No declara"
+    assert tabla.loc["c", "Estrato principal (declarado)"] == "Sin datos"
+    assert tabla.loc["b", "Tipo principal"] == "local (100%)"
+
+
+def test_perfil_y_calidad_con_datos(reales: dict[str, pd.DataFrame]) -> None:
+    perfil, calidad = reales["perfil_inmobiliaria"], reales["calidad_inmobiliaria"]
+    for figura in (
+        graficas.perfil_tipos(perfil, "venta"),
+        graficas.perfil_tipos(perfil, "arriendo"),
+        graficas.perfil_operacion(perfil),
+        graficas.calidad_datos(calidad),
+    ):
+        assert figura.data
+    tabla = graficas.tabla_calidad(calidad)
+    assert tabla["Índice de completitud"].is_monotonic_decreasing
+    assert tabla["Índice de completitud"].between(0, 100).all()
+    assert len(graficas.tabla_perfil(perfil, reales["estratos_inmobiliaria"])) == len(
+        set(perfil["fuente"])
+    )
+
+
+def test_perfil_y_calidad_vacios(vacias: dict[str, pd.DataFrame]) -> None:
+    assert graficas.tabla_perfil(
+        vacias["perfil_inmobiliaria"], vacias["estratos_inmobiliaria"]
+    ).empty
+    assert graficas.tabla_calidad(vacias["calidad_inmobiliaria"]).empty
 
 
 # ---------------------------------------------------------------- Formato

@@ -253,6 +253,8 @@ TABLAS_AGREGADAS: Final = (
     "desvio_precio",
     "cobertura_estrato",
     "calidad_pipeline",
+    "clusteres_espaciales",
+    "precios_municipio",
     "cobertura_inmobiliaria",
     "cobertura_comuna",
     "economia_inmobiliaria",

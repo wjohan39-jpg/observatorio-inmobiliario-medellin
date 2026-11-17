@@ -147,6 +147,11 @@ def _llamadas(tablas: dict[str, pd.DataFrame]) -> list[go.Figure]:
         graficas.atipicos(tablas["calidad_pipeline"]),
         graficas.metodo_de_ubicacion(tablas["calidad_pipeline"]),
         graficas.desacuerdo_de_ubicacion(tablas["calidad_pipeline"]),
+        graficas.mapa_clusteres(tablas["clusteres_espaciales"], geojson, "venta"),
+        graficas.comparacion_zonas(tablas["precios_municipio"], "venta"),
+        graficas.distancia_al_centro(
+            tablas["precios_zona"], geojson, "venta", "Centro (Parque Berrío)"
+        ),
     ]
 
 
@@ -622,6 +627,52 @@ def test_calidad_pipeline_vacia(vacias: dict[str, pd.DataFrame]) -> None:
     assert graficas.tabla_calidad_pipeline(calidad).empty
     assert graficas.faltantes(calidad).layout.title.text
     assert graficas.grafias_por_barrio(calidad).layout.title.text
+
+
+def test_geografia_con_datos_reales(reales: dict[str, pd.DataFrame]) -> None:
+    clusteres, zonas = reales["clusteres_espaciales"], reales["precios_municipio"]
+    precios, geojson = reales["precios_zona"], cargar_geojson()
+    for operacion in ("venta", "arriendo"):
+        resumen = graficas.resumen_moran(clusteres, operacion)
+        assert resumen is not None
+        assert -1 <= resumen["i"] <= 1
+        assert 0 < resumen["p"] <= 1
+        assert sum(resumen["clusteres"].values()) == resumen["barrios"]
+        assert graficas.mapa_clusteres(clusteres, geojson, operacion).data
+        assert graficas.comparacion_zonas(zonas, operacion).data
+        assert graficas.distancia_al_centro(
+            precios, geojson, operacion, "Centro (Parque Berrío)"
+        ).data
+    tabla = graficas.tabla_clusteres(clusteres, "venta")
+    assert set(tabla["Clúster"]) <= {"Alto-alto", "Bajo-bajo", "Alto-bajo", "Bajo-alto"}
+    assert (tabla["p local"] < 0.05).all()
+
+
+def test_correlacion_distancia(reales: dict[str, pd.DataFrame]) -> None:
+    tabla = graficas.correlacion_distancia(reales["precios_zona"], cargar_geojson())
+    assert list(tabla.columns) == ["Centro", "Operación", "Barrios", "Spearman"]
+    assert len(tabla) == 2 * len(graficas.CENTROS)
+    assert tabla["Spearman"].between(-1, 1).all()
+
+
+def test_tabla_zonas_y_estratos(reales: dict[str, pd.DataFrame]) -> None:
+    zonas = reales["precios_municipio"]
+    tabla = graficas.tabla_zonas(zonas, "venta")
+    assert tabla["Mediana (m²)"].is_monotonic_decreasing
+    assert {"El Poblado", "Laureles - Estadio", "Medellín"} <= set(tabla["Zona"])
+    assert (tabla["Anuncios"] >= MINIMO_PUBLICACION).all()
+    assert graficas.comparacion_zonas(zonas, "venta", "apartamento", "4").data
+
+
+def test_geografia_vacia(vacias: dict[str, pd.DataFrame]) -> None:
+    assert graficas.resumen_moran(vacias["clusteres_espaciales"], "venta") is None
+    assert graficas.tabla_clusteres(vacias["clusteres_espaciales"], "venta").empty
+    assert graficas.tabla_zonas(vacias["precios_municipio"], "venta").empty
+    geojson = cargar_geojson()
+    assert graficas.correlacion_distancia(vacias["precios_zona"], geojson).empty
+    assert graficas.mapa_clusteres(
+        vacias["clusteres_espaciales"], geojson, "venta"
+    ).layout.title.text
 
 
 # ---------------------------------------------------------------- Formato

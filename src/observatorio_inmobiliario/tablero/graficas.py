@@ -11,6 +11,7 @@ Reglas comunes:
 from collections.abc import Iterable
 from typing import Any, Final
 
+import numpy as np
 import pandas as pd
 import plotly.express as px
 import plotly.graph_objects as go
@@ -22,11 +23,21 @@ from observatorio_inmobiliario.agregados import (
     ANALISIS_ESTRATO,
     ANALISIS_TIPO,
     GLOBAL,
+    MINIMO_PUBLICACION,
     NIVEL_CIUDAD,
     RANGOS_AREA,
     RANGOS_PRECIO,
     TIPOS_COMPARADOS,
     TODOS_LOS_TIPOS,
+)
+from observatorio_inmobiliario.espacial import (
+    ALTO_ALTO,
+    ALTO_BAJO,
+    BAJO_ALTO,
+    BAJO_BAJO,
+    NO_SIGNIFICATIVO,
+    centroides,
+    distancia_km,
 )
 
 COLORES_FUENTE: Final = {
@@ -1798,3 +1809,248 @@ def tabla_calidad_pipeline(calidad: pd.DataFrame) -> pd.DataFrame:
         "grafias_por_barrio": "Grafías por barrio",
     }
     return calidad[list(columnas)].rename(columns=columnas).reset_index(drop=True)
+
+
+# ------------------------------------------------------------------- Geografía
+
+CENTROS: Final = {
+    "Centro (Parque Berrío)": (6.2518, -75.5681),
+    "El Poblado (Parque Lleras)": (6.2087, -75.5666),
+    "Laureles (Primer Parque)": (6.2441, -75.5918),
+}
+"""Puntos de referencia aproximados (latitud, longitud), no centros oficiales: Medellín tiene
+varios centros, por eso se mide contra los tres."""
+COLORES_CLUSTER: Final = {
+    ALTO_ALTO: "#d73027",
+    BAJO_BAJO: "#4575b4",
+    ALTO_BAJO: "#fdae61",
+    BAJO_ALTO: "#abd9e9",
+    NO_SIGNIFICATIVO: "#e0e0e0",
+}
+TIPOS_ZONA: Final = ("vivienda", "apartamento", "apartaestudio", "casa")
+ESTRATOS_ZONA: Final = ("todos", "2", "3", "4", "5", "6")
+
+
+def resumen_moran(clusteres: pd.DataFrame, operacion: str) -> dict[str, Any] | None:
+    """Moran global de la operación y cuántos barrios hay en cada tipo de clúster."""
+    filas = clusteres[clusteres["operacion"] == operacion]
+    if filas.empty:
+        return None
+    primera = filas.iloc[0]
+    cuenta = filas["cluster"].astype(str).value_counts()
+    return {
+        "i": float(primera["moran_i"]),
+        "p": float(primera["p_global"]),
+        "barrios": int(primera["barrios"]),
+        "clusteres": {nombre: int(cuenta.get(nombre, 0)) for nombre in COLORES_CLUSTER},
+    }
+
+
+def mapa_clusteres(clusteres: pd.DataFrame, geojson: dict[str, Any], operacion: str) -> go.Figure:
+    """Mapa de clústeres espaciales del precio por m² (Moran local); gris, sin significancia."""
+    titulo = f"Clústeres espaciales del precio por m² en {operacion} (Moran local)"
+    filas = clusteres[clusteres["operacion"] == operacion]
+    if filas.empty:
+        return _sin_datos(titulo)
+    filas = filas.assign(
+        cluster=filas["cluster"].astype(str),
+        precio_m2_mediana=filas["precio_m2_mediana"].astype("float64"),
+        rezago_m2=filas["rezago_m2"].astype("float64"),
+    )
+    figura = px.choropleth_map(
+        filas,
+        geojson=geojson,
+        locations="codigo",
+        featureidkey="properties.codigo",
+        color="cluster",
+        color_discrete_map=COLORES_CLUSTER,
+        category_orders={"cluster": list(COLORES_CLUSTER)},
+        hover_name="nombre",
+        hover_data={
+            "codigo": False,
+            "precio_m2_mediana": ":,.0f",
+            "rezago_m2": ":,.0f",
+            "p_local": ":.3f",
+        },
+        labels={
+            "cluster": "Clúster",
+            "precio_m2_mediana": "COP por m²",
+            "rezago_m2": "Vecinos (COP por m²)",
+            "p_local": "p local",
+        },
+        center=CENTRO_MEDELLIN,
+        zoom=10.5,
+        opacity=0.8,
+        map_style="carto-positron",
+    )
+    figura.update_layout(title=titulo, margin={"l": 0, "r": 0, "t": 40, "b": 0})
+    return figura
+
+
+def tabla_clusteres(clusteres: pd.DataFrame, operacion: str) -> pd.DataFrame:
+    """Los barrios con clúster significativo, de la mayor a la menor diferencia con su entorno."""
+    filas = clusteres[
+        (clusteres["operacion"] == operacion) & (clusteres["cluster"] != NO_SIGNIFICATIVO)
+    ]
+    if filas.empty:
+        return pd.DataFrame()
+    filas = filas.assign(
+        precio=filas["precio_m2_mediana"].astype("float64"),
+        vecinos=filas["rezago_m2"].astype("float64"),
+        p=filas["p_local"].astype("float64"),
+    ).sort_values(["cluster", "precio"], ascending=[True, False])
+    return filas[["nombre", "comuna", "cluster", "precio", "vecinos", "p"]].rename(
+        columns={
+            "nombre": "Barrio",
+            "comuna": "Comuna",
+            "cluster": "Clúster",
+            "precio": "COP por m²",
+            "vecinos": "Vecinos (COP por m²)",
+            "p": "p local",
+        }
+    )
+
+
+def _distancias(
+    precios: pd.DataFrame, geojson: dict[str, Any], operacion: str, centro: str
+) -> pd.DataFrame:
+    """Barrios con precio de ``operacion`` y su distancia (km) a ``centro``."""
+    filas = precios[
+        (precios["nivel"] == "barrio")
+        & (precios["operacion"] == operacion)
+        & (precios["tipo"] == VIVIENDA)
+        & precios["precio_m2_mediana"].notna()
+    ]
+    puntos = centroides(geojson)
+    filas = filas[filas["codigo"].isin(puntos)]
+    if filas.empty:
+        return pd.DataFrame()
+    latitud, longitud = CENTROS[centro]
+    kilometros = [
+        distancia_km(latitud, longitud, *puntos[codigo]) for codigo in filas["codigo"].astype(str)
+    ]
+    return filas.assign(km=kilometros, precio=filas["precio_m2_mediana"].astype("float64"))[
+        ["nombre", "comuna", "anuncios", "km", "precio"]
+    ]
+
+
+def distancia_al_centro(
+    precios: pd.DataFrame, geojson: dict[str, Any], operacion: str, centro: str
+) -> go.Figure:
+    """Precio por m² de cada barrio frente a su distancia a un centro, con su tendencia."""
+    titulo = f"{operacion.title()}: precio por m² y distancia a {centro}"
+    datos = _distancias(precios, geojson, operacion, centro)
+    if len(datos) < 3:
+        return _sin_datos(titulo)
+    figura = px.scatter(
+        datos,
+        x="km",
+        y="precio",
+        hover_name="nombre",
+        hover_data={"km": ":.1f", "precio": ":,.0f", "anuncios": True},
+        labels={"km": "Distancia (km)", "precio": "COP por m² (mediana)", "anuncios": "Anuncios"},
+        log_y=True,
+        template=_PLANTILLA,
+    )
+    pendiente, origen = np.polyfit(datos["km"], np.log10(datos["precio"]), 1)
+    xs = np.array([datos["km"].min(), datos["km"].max()])
+    figura.add_scatter(
+        x=xs,
+        y=10 ** (origen + pendiente * xs),
+        mode="lines",
+        name="Tendencia",
+        line={"dash": "dot"},
+    )
+    figura.update_layout(title=titulo)
+    return figura
+
+
+def correlacion_distancia(precios: pd.DataFrame, geojson: dict[str, Any]) -> pd.DataFrame:
+    """Correlación de Spearman entre la distancia a cada centro y el precio por m² de los barrios.
+
+    Negativa: el precio baja al alejarse. Es una asociación entre barrios, no un efecto.
+    """
+    filas = []
+    for operacion in ("venta", "arriendo"):
+        for centro in CENTROS:
+            datos = _distancias(precios, geojson, operacion, centro)
+            if len(datos) >= MINIMO_PUBLICACION:
+                filas.append(
+                    {
+                        "Centro": centro,
+                        "Operación": operacion,
+                        "Barrios": len(datos),
+                        "Spearman": round(
+                            float(datos["km"].rank().corr(datos["precio"].rank())), 2
+                        ),
+                    }
+                )
+    return pd.DataFrame(filas, columns=["Centro", "Operación", "Barrios", "Spearman"])
+
+
+def _zonas(zonas: pd.DataFrame, operacion: str, tipo: str, estrato: str) -> pd.DataFrame:
+    filas = zonas[
+        (zonas["operacion"] == operacion) & (zonas["tipo"] == tipo) & (zonas["estrato"] == estrato)
+    ]
+    return filas.assign(
+        anuncios=filas["anuncios"].astype("int64"),
+        mediana=filas["precio_m2_mediana"].astype("float64"),
+        p25=filas["precio_m2_p25"].astype("float64"),
+        p75=filas["precio_m2_p75"].astype("float64"),
+    )
+
+
+def comparacion_zonas(
+    zonas: pd.DataFrame, operacion: str, tipo: str = VIVIENDA, estrato: str = "todos"
+) -> go.Figure:
+    """Mediana del m² en Medellín, El Poblado, Laureles y cada municipio (barras: Q25 a Q75)."""
+    titulo = f"{operacion.title()}: precio por m² de {tipo} por zona (estrato {estrato})"
+    filas = _zonas(zonas, operacion, tipo, estrato)
+    if filas.empty:
+        return _sin_datos(titulo)
+    filas = filas.assign(
+        arriba=filas["p75"] - filas["mediana"],
+        abajo=filas["mediana"] - filas["p25"],
+        zona=filas["zona"].astype(str),
+        nivel=filas["nivel"]
+        .astype(str)
+        .map({"comuna": "Comuna de Medellín", "municipio": "Municipio"}),
+    ).sort_values("mediana")
+    figura = px.bar(
+        filas,
+        x="mediana",
+        y="zona",
+        color="nivel",
+        orientation="h",
+        error_x="arriba",
+        error_x_minus="abajo",
+        hover_data={"anuncios": True, "mediana": ":,.0f"},
+        color_discrete_map={"Comuna de Medellín": "#d95f0e", "Municipio": "#2c7fb8"},
+        labels={"mediana": "COP por m² (mediana)", "zona": "", "nivel": "", "anuncios": "Anuncios"},
+        template=_PLANTILLA,
+    )
+    figura.update_layout(title=titulo, height=max(400, 26 * len(filas)))
+    return figura
+
+
+def tabla_zonas(
+    zonas: pd.DataFrame, operacion: str, tipo: str = VIVIENDA, estrato: str = "todos"
+) -> pd.DataFrame:
+    """Las zonas con su mediana y cuartiles, de la más a la menos cara."""
+    filas = _zonas(zonas, operacion, tipo, estrato)
+    if filas.empty:
+        return pd.DataFrame()
+    filas = filas.sort_values("mediana", ascending=False)
+    tabla = filas[["zona", "nivel", "anuncios", "mediana", "p25", "p75"]].rename(
+        columns={
+            "zona": "Zona",
+            "nivel": "Nivel",
+            "anuncios": "Anuncios",
+            "mediana": "Mediana (m²)",
+            "p25": "Cuartil 25 (m²)",
+            "p75": "Cuartil 75 (m²)",
+        }
+    )
+    return tabla.round(0).astype(
+        {"Mediana (m²)": "int64", "Cuartil 25 (m²)": "int64", "Cuartil 75 (m²)": "int64"}
+    )

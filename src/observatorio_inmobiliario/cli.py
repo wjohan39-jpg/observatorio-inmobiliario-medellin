@@ -412,8 +412,9 @@ def _agregados(limpio: Path, compartidos: Path, salida: Path) -> int:
     base = agregados.base_analisis(del_periodo)
     parejas, grupos = leer_compartidos(compartidos, semana)
     historico = leer_limpio(limpio)
+    precios = agregados.precios_zona(base, semana)
     tablas = {
-        "precios_zona": agregados.precios_zona(base, semana),
+        "precios_zona": precios,
         "mercado_precios": agregados.mercado_precios(base, semana),
         "oferta_zona": agregados.oferta_zona(base, semana),
         "distribucion_oferta": agregados.distribucion_oferta(base, semana),
@@ -423,6 +424,10 @@ def _agregados(limpio: Path, compartidos: Path, salida: Path) -> int:
         "desvio_precio": agregados.desvio_precio(base, semana),
         "cobertura_estrato": agregados.cobertura_estrato(base, semana),
         "calidad_pipeline": agregados.calidad_pipeline(del_periodo, parejas, semana),
+        "clusteres_espaciales": agregados.clusteres_espaciales(
+            precios, json.loads(RUTA_GEOJSON.read_text(encoding="utf-8")), semana
+        ),
+        "precios_municipio": agregados.precios_municipio(del_periodo, semana),
         "compartidas_inmobiliaria": agregados.compartidas_inmobiliaria(
             parejas, grupos, base, semana
         ),

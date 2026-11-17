@@ -82,6 +82,7 @@ PAGINAS_2 = [
     "pages/9_Cuota_y_perfil.py",
     "pages/10_Oportunidades_y_nichos.py",
     "pages/11_Calidad_de_los_datos.py",
+    "pages/12_Geografia.py",
     "pages/4_Propiedades_compartidas.py",
     "pages/5_Evolución.py",
     "pages/6_Metodología.py",
@@ -165,6 +166,18 @@ def test_calidad_muestra_duplicados() -> None:
     etiquetas = [m.label for m in app.metric]
     assert "Duplicados exactos" in etiquetas
     assert app.dataframe
+
+
+def test_geografia_cambia_selectores() -> None:
+    app = _correr("pages/12_Geografia.py")
+    assert any("Moran" in m.label for m in app.metric)
+    app.radio(key="operacion_geo").set_value("arriendo").run()
+    assert not app.exception
+    app.selectbox(key="centro_geo").set_value("El Poblado (Parque Lleras)").run()
+    assert not app.exception
+    app.selectbox(key="tipo_zona").set_value("apartamento").run()
+    app.selectbox(key="estrato_zona").set_value("4").run()
+    assert not app.exception
 
 
 def test_precios_sin_columnas_privadas() -> None:

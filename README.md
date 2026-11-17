@@ -161,6 +161,8 @@ Resume la última semana limpia y todo el histórico en `data/agregados/`. **Son
 | `desvio_precio` | Oportunidades | Cuántos anuncios de vivienda están bajo (≤ 80 %) o sobre (≥ 120 %) la mediana de su barrio, por barrio, inmobiliaria y ciudad; son conteos, sin anuncios concretos |
 | `cobertura_estrato` | Nichos | Anuncios e inmobiliarias por estrato declarado, para la ciudad y cada comuna |
 | `calidad_pipeline` | Calidad de los datos | Por inmobiliaria: % de faltantes, atípicos por motivo, duplicados exactos, cómo se resolvió el barrio, desacuerdo entre barrio declarado y coordenadas y grafías por barrio |
+| `clusteres_espaciales` | Geografía | Moran global y local del precio por m² por barrio (clústeres alto-alto, bajo-bajo…) |
+| `precios_municipio` | Geografía | Precio por m² de vivienda por municipio del Valle y para El Poblado y Laureles, por tipo y estrato |
 | `cobertura_inmobiliaria` | 2 y 6. Cobertura y reconocimiento | Anuncios, barrios y comunas de cada inmobiliaria, y su comuna principal |
 | `cobertura_comuna` | 2. Dónde se concentra | % de los anuncios de cada inmobiliaria en cada comuna |
 | `economia_inmobiliaria` | 3. Economía | Medianas de precio e índice de precio relativo a su barrio |
@@ -212,7 +214,7 @@ uv run --group analisis jupyter nbconvert --to notebook --execute --inplace note
 El dashboard tiene dos versiones con la misma información. Las dos leen solo `data/agregados/`, así que nunca muestran ids, enlaces ni coordenadas de anuncios.
 
 - **Sitio estático en GitHub Pages:** es el link de arriba. GitHub Actions (`.github/workflows/pages.yml`) lo genera con `observatorio sitio` y lo publica cada vez que cambian los datos agregados. Las gráficas son interactivas: zoom y detalle al pasar el mouse.
-- **App de Streamlit** (`app/`): 11 páginas con selectores. Se corre en local:
+- **App de Streamlit** (`app/`): 12 páginas con selectores. Se corre en local:
 
   ```bash
   uv run streamlit run app/Inicio.py
@@ -227,6 +229,7 @@ El dashboard tiene dos versiones con la misma información. Las dos leen solo `d
 | Cuota y perfil | Cuota de inventario de cada inmobiliaria (total y por zona), concentración HHI, perfil de tipo, operación y estrato, y calidad de los datos |
 | Oportunidades y nichos | Barrios con poca cobertura, estratos sin anuncios, anuncios bajo o sobre el mercado de su barrio y precio y rentabilidad por barrio |
 | Calidad de los datos | Faltantes, atípicos, ubicación y nomenclatura de barrios, y duplicados, por inmobiliaria |
+| Geografía | Mapa de precios, clústeres espaciales (Moran), distancia a los centros y comparación entre El Poblado, Laureles y los municipios |
 | Inmobiliarias | Cobertura, concentración por comuna, precio relativo a su barrio, estratos y reconocimiento |
 | Propiedades compartidas | Parejas por confianza y grupos anónimos con el precio de cada inmobiliaria |
 | Evolución | Precios por semana y rotación de inventario |

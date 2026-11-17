@@ -84,7 +84,7 @@ def _seccion(id_: str, titulo: str, contenido: list[str]) -> str:
 
 
 def generar_sitio(tablas: dict[str, pd.DataFrame], geojson: dict[str, Any], salida: Path) -> Path:
-    """Escribe ``salida/index.html`` con las 11 secciones del dashboard y devuelve su ruta."""
+    """Escribe ``salida/index.html`` con las 12 secciones del dashboard y devuelve su ruta."""
     figura = _Graficas()
     cobertura = tablas["cobertura_inmobiliaria"]
     semana = str(cobertura["semana"].iloc[0]) if not cobertura.empty else "sin datos"
@@ -320,6 +320,52 @@ def generar_sitio(tablas: dict[str, pd.DataFrame], geojson: dict[str, Any], sali
             _tabla(graficas.tabla_calidad_pipeline(calidad_datos)),
         ],
     )
+    clusteres, zonas = tablas["clusteres_espaciales"], tablas["precios_municipio"]
+    moran = {op: graficas.resumen_moran(clusteres, op) for op in ("venta", "arriendo")}
+    frases_moran = [
+        f"<b>{op}</b>: I = {str(round(r['i'], 2)).replace('.', ',')} "
+        f"(p = {str(round(r['p'], 3)).replace('.', ',')}, {int(r['barrios'])} barrios)"
+        for op, r in moran.items()
+        if r is not None
+    ]
+    geografia = _seccion(
+        "geografia",
+        "Geografía de los precios",
+        [
+            "<p>Dónde se agrupan los barrios caros o baratos, qué pasa al alejarse de los "
+            "centros y cómo se compara Medellín con los municipios vecinos. Mediana del precio "
+            "por m² de vivienda, con 5 anuncios o más por cifra.</p>",
+            "<h3>Clústeres espaciales (Moran)</h3>",
+            "<p>Índice de Moran global: " + "; ".join(frases_moran) + ". Positivo es que los "
+            "barrios con precios parecidos están juntos; cerca de 0, sin patrón. Significancia "
+            "por permutaciones, sin corrección por comparaciones múltiples.</p>"
+            if frases_moran
+            else _aviso("Todavía no hay datos de autocorrelación espacial."),
+            figura(graficas.mapa_clusteres(clusteres, geojson, "venta")),
+            figura(graficas.mapa_clusteres(clusteres, geojson, "arriendo")),
+            "<h3>Distancia a los centros</h3>",
+            figura(
+                graficas.distancia_al_centro(precios, geojson, "venta", "Centro (Parque Berrío)")
+            ),
+            figura(
+                graficas.distancia_al_centro(
+                    precios, geojson, "venta", "El Poblado (Parque Lleras)"
+                )
+            ),
+            _tabla(graficas.correlacion_distancia(precios, geojson)),
+            "<p>Spearman entre la distancia en línea recta al centroide del barrio y el "
+            "precio por m²: negativo si el precio baja al alejarse, positivo si sube. Medellín "
+            "tiene varios centros y los puntos de referencia son aproximados. Es una "
+            "asociación, no un efecto.</p>",
+            "<h3>Poblado, Laureles y los municipios</h3>",
+            figura(graficas.comparacion_zonas(zonas, "venta")),
+            figura(graficas.comparacion_zonas(zonas, "arriendo")),
+            _tabla(graficas.tabla_zonas(zonas, "venta")),
+            "<p>Medellín incluye a El Poblado y Laureles, que son comunas. Cada inmobiliaria "
+            "cubre distinto cada municipio: con pocos anuncios la mediana es poco estable.</p>",
+            figura(graficas.mapa_barrios(precios, geojson, "venta")),
+        ],
+    )
     indice = reconocimiento(cobertura, None)
     inmobiliarias = _seccion(
         "inmobiliarias",
@@ -417,12 +463,12 @@ Datos de la semana <b>{escape(semana)}</b>.</div>
 <nav>
 <a href="#resumen">Resumen</a><a href="#barrios">Barrios</a><a href="#precios">Precios</a>
 <a href="#oferta">Oferta</a><a href="#cuota">Cuota</a><a href="#nichos">Nichos</a>
-<a href="#calidad">Calidad</a>
+<a href="#calidad">Calidad</a><a href="#geografia">Geografía</a>
 <a href="#inmobiliarias">Inmobiliarias</a><a href="#compartidos">Compartidas</a>
 <a href="#evolucion">Evolución</a><a href="#metodologia">Metodología</a>
 </nav>
 <main>
-{resumen}{barrios}{analisis}{movimiento}{cuota_agencias}{nichos}{seccion_calidad}{inmobiliarias}{compartidos}{evolucion}{metodologia}
+{resumen}{barrios}{analisis}{movimiento}{cuota_agencias}{nichos}{seccion_calidad}{geografia}{inmobiliarias}{compartidos}{evolucion}{metodologia}
 </main>
 <footer>Generado a partir de <code>data/agregados/</code> ·
 <a href="{REPOSITORIO}">Código en GitHub</a></footer>

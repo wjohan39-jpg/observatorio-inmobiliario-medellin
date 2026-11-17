@@ -6,15 +6,18 @@ import pytest
 from conftest import fila
 from observatorio_inmobiliario.agregados import (
     COLUMNAS_CALIDAD_PIPELINE,
+    COLUMNAS_CLUSTERES,
     COLUMNAS_COBERTURA_ESTRATO,
     COLUMNAS_COMPARTIDAS,
     COLUMNAS_DESVIO,
+    COLUMNAS_PRECIOS_MUNICIPIO,
     MINIMO_PARES_PRECIO,
     NIVELES,
     anuncios_unicos,
     base_analisis,
     calidad_inmobiliaria,
     calidad_pipeline,
+    clusteres_espaciales,
     cobertura_comuna,
     cobertura_estrato,
     cobertura_inmobiliaria,
@@ -32,6 +35,7 @@ from observatorio_inmobiliario.agregados import (
     mercado_precios,
     oferta_zona,
     perfil_inmobiliaria,
+    precios_municipio,
     precios_zona,
 )
 from observatorio_inmobiliario.emparejamiento import Confianza, agrupar, emparejar
@@ -1321,3 +1325,162 @@ def test_calidad_pipeline_vacia(limpio: Any) -> None:
     assert list(tabla.columns) == COLUMNAS_CALIDAD_PIPELINE
     assert str(tabla["registros"].dtype) == "Int64"
     assert str(tabla["sin_area_pct"].dtype) == "float64"
+
+
+# ------------------------------------------------------------------- Geografía
+
+
+def _precios_de_cuadricula(valores: dict[str, float], operacion: str = "venta") -> pd.DataFrame:
+    return pd.DataFrame(
+        [
+            {
+                "nivel": "barrio",
+                "codigo": codigo,
+                "nombre": f"Barrio {codigo}",
+                "comuna": "01",
+                "operacion": operacion,
+                "tipo": "vivienda",
+                "anuncios": 10,
+                "precio_m2_mediana": valor,
+            }
+            for codigo, valor in valores.items()
+        ]
+    ).astype({"anuncios": "Int64"})
+
+
+def _geojson_de_cuadricula(lado: int) -> dict[str, Any]:
+    from shapely.geometry import box
+
+    return {
+        "features": [
+            {
+                "properties": {"codigo": f"{i}-{j}"},
+                "geometry": box(j, i, j + 1, i + 1).__geo_interface__,
+            }
+            for i in range(lado)
+            for j in range(lado)
+        ]
+    }
+
+
+def test_clusteres_espaciales_detecta_un_gradiente() -> None:
+    valores = {f"{i}-{j}": 1_000_000.0 * (1 + i + j) for i in range(5) for j in range(5)}
+    tabla = clusteres_espaciales(_precios_de_cuadricula(valores), _geojson_de_cuadricula(5), SEMANA)
+
+    assert len(tabla) == 25
+    assert list(tabla.columns) == COLUMNAS_CLUSTERES
+    assert (tabla["moran_i"] > 0.5).all()
+    assert (tabla["p_global"] < 0.05).all()
+    assert set(tabla["barrios"]) == {25}
+    assert set(tabla["operacion"]) == {"venta"}
+    assert not set(tabla["cluster"]) & {"Alto-bajo", "Bajo-alto"}  # un gradiente no contrasta
+    esquina = tabla[tabla["codigo"] == "4-4"].iloc[0]
+    assert esquina["precio_m2_mediana"] == 9_000_000
+    assert 7_000_000 < esquina["rezago_m2"] < 9_000_000  # los vecinos son más baratos
+    assert tabla["semana"].eq(SEMANA).all()
+
+
+def test_clusteres_espaciales_separa_operaciones_y_exige_minimo() -> None:
+    venta = {f"{i}-{j}": 1_000_000.0 * (1 + i + j) for i in range(3) for j in range(3)}
+    arriendo = {"0-0": 1.0, "0-1": 2.0}  # menos barrios que el mínimo
+    precios = pd.concat(
+        [_precios_de_cuadricula(venta), _precios_de_cuadricula(arriendo, "arriendo")]
+    )
+    tabla = clusteres_espaciales(precios, _geojson_de_cuadricula(3), SEMANA)
+    assert set(tabla["operacion"]) == {"venta"}
+
+
+def test_clusteres_espaciales_ignora_barrios_sin_vecinos_con_datos() -> None:
+    valores = {f"{i}-{j}": 1_000_000.0 * (1 + i + j) for i in range(3) for j in range(3)}
+    valores["4-4"] = 5_000_000.0  # fuera de la cuadrícula de 3 x 3: sin polígono
+    tabla = clusteres_espaciales(_precios_de_cuadricula(valores), _geojson_de_cuadricula(5), SEMANA)
+    assert "4-4" not in set(tabla["codigo"])  # sin vecinos con datos: queda fuera
+    assert set(tabla["barrios"]) == {9}
+
+
+def test_clusteres_espaciales_vacia() -> None:
+    tabla = clusteres_espaciales(pd.DataFrame(), {"features": []}, SEMANA)
+    assert tabla.empty
+    assert list(tabla.columns) == COLUMNAS_CLUSTERES
+    assert str(tabla["moran_i"].dtype) == "float64"
+    assert str(tabla["barrios"].dtype) == "Int64"
+
+
+def _municipal(n: int, prefijo: str, **cambios: Any) -> list[dict[str, Any]]:
+    return [
+        fila(id_fuente=f"{prefijo}-{i}", precio_m2=float(10_000 * (i + 1)), **cambios)
+        for i in range(n)
+    ]
+
+
+FUERA = {
+    "municipio_normalizado": "Envigado",
+    "es_medellin": False,
+    "comuna": None,
+    "nombre_comuna": None,
+    "codigo_barrio": None,
+    "barrio_normalizado": None,
+}
+
+
+def _zona_municipio(
+    tabla: pd.DataFrame, nivel: str, zona: str, estrato: str = "todos", tipo: str = "vivienda"
+) -> Any:
+    filas = tabla[
+        (tabla["nivel"] == nivel)
+        & (tabla["zona"] == zona)
+        & (tabla["estrato"] == estrato)
+        & (tabla["tipo"] == tipo)
+        & (tabla["operacion"] == "arriendo")
+    ]
+    assert len(filas) == 1, (nivel, zona, estrato, tipo, len(filas))
+    return filas.iloc[0]
+
+
+def test_precios_municipio_incluye_otros_municipios_y_comunas(limpio: Any) -> None:
+    filas = [
+        *_municipal(5, "pob", comuna="14", nombre_comuna="EL POBLADO"),
+        *_municipal(5, "lau"),  # comuna 11 por defecto
+        *_municipal(5, "env", **FUERA),
+    ]
+    tabla = precios_municipio(limpio(*filas), SEMANA)
+
+    assert _zona_municipio(tabla, "municipio", "Medellín")["anuncios"] == 10
+    assert _zona_municipio(tabla, "municipio", "Envigado")["anuncios"] == 5
+    assert _zona_municipio(tabla, "comuna", "El Poblado")["anuncios"] == 5
+    assert _zona_municipio(tabla, "comuna", "Laureles - Estadio")["anuncios"] == 5
+    envigado = _zona_municipio(tabla, "municipio", "Envigado")
+    assert envigado["precio_m2_mediana"] == 30_000
+    assert envigado["precio_m2_p25"] == 20_000
+    assert envigado["precio_m2_p75"] == 40_000
+    assert list(tabla.columns) == COLUMNAS_PRECIOS_MUNICIPIO
+
+
+def test_precios_municipio_por_estrato_y_minimo(limpio: Any) -> None:
+    filas = [
+        *_municipal(5, "e4", estrato=4, **FUERA),
+        *_municipal(4, "e5", estrato=5, **FUERA),  # no llega al mínimo
+        *_municipal(2, "sin", estrato=None, **FUERA),
+    ]
+    tabla = precios_municipio(limpio(*filas), SEMANA)
+    assert _zona_municipio(tabla, "municipio", "Envigado")["anuncios"] == 11
+    assert _zona_municipio(tabla, "municipio", "Envigado", estrato="4")["anuncios"] == 5
+    assert "5" not in set(tabla["estrato"])
+
+
+def test_precios_municipio_solo_vivienda_y_sin_atipicos(limpio: Any) -> None:
+    filas = [
+        *_municipal(5, "ok", **FUERA),
+        *_municipal(5, "loc", tipo_normalizado="local", **FUERA),
+        *_municipal(3, "atip", es_atipico=True, **FUERA),
+    ]
+    tabla = precios_municipio(limpio(*filas), SEMANA)
+    assert _zona_municipio(tabla, "municipio", "Envigado")["anuncios"] == 5
+    assert _zona_municipio(tabla, "municipio", "Envigado", tipo="apartamento")["anuncios"] == 5
+
+
+def test_precios_municipio_vacia(limpio: Any) -> None:
+    tabla = precios_municipio(limpio(), SEMANA)
+    assert tabla.empty
+    assert list(tabla.columns) == COLUMNAS_PRECIOS_MUNICIPIO
+    assert str(tabla["anuncios"].dtype) == "Int64"

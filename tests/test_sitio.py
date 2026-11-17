@@ -21,6 +21,7 @@ SECCIONES = [
     "cuota",
     "nichos",
     "calidad",
+    "geografia",
     "inmobiliarias",
     "compartidos",
     "evolucion",

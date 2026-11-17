@@ -11,6 +11,7 @@ por separado.
 
 from typing import Any, Final
 
+import numpy as np
 import pandas as pd
 from pandas.core.groupby import DataFrameGroupBy
 
@@ -1420,3 +1421,158 @@ def calidad_pipeline(
     tabla["orden"] = tabla["fuente"].eq(GLOBAL)
     tabla = tabla.sort_values(["orden", "fuente"], kind="stable")
     return tabla[COLUMNAS_CALIDAD_PIPELINE].reset_index(drop=True)
+
+
+# ------------------------------------------------------------------- Geografía
+
+COLUMNAS_CLUSTERES: Final = [
+    "semana",
+    "operacion",
+    "codigo",
+    "nombre",
+    "comuna",
+    "precio_m2_mediana",
+    "rezago_m2",
+    "cluster",
+    "p_local",
+    "moran_i",
+    "p_global",
+    "barrios",
+]
+_TEXTO_CLUSTERES: Final = COLUMNAS_CLUSTERES[:5]
+COLUMNAS_PRECIOS_MUNICIPIO: Final = [
+    "semana",
+    "nivel",
+    "zona",
+    "operacion",
+    "tipo",
+    "estrato",
+    "anuncios",
+    "precio_m2_mediana",
+    "precio_m2_p25",
+    "precio_m2_p75",
+]
+_TEXTO_PRECIOS_MUNICIPIO: Final = COLUMNAS_PRECIOS_MUNICIPIO[:6]
+ZONAS_DE_MEDELLIN: Final = {"14": "El Poblado", "11": "Laureles - Estadio"}
+"""Comunas de Medellín que se comparan con los municipios, por su código de comuna."""
+TODOS_LOS_ESTRATOS: Final = "todos"
+
+
+def _clusteres_vacia() -> pd.DataFrame:
+    tabla = _vacia(COLUMNAS_CLUSTERES, _TEXTO_CLUSTERES)
+    return tabla.astype({"p_local": "float64", "moran_i": "float64", "p_global": "float64"})
+
+
+def clusteres_espaciales(
+    precios: pd.DataFrame, geojson: dict[str, Any], semana: str
+) -> pd.DataFrame:
+    """Moran global y local del precio por m² de vivienda por barrio (clústeres espaciales).
+
+    Una fila por barrio y operación. Usa la mediana de ``precios`` (que ya exige 5 anuncios con
+    precio por m²) en logaritmo, la contigüidad de los polígonos de ``geojson`` y los barrios
+    que tienen al menos un vecino con dato. ``moran_i``, ``p_global`` y ``barrios`` se repiten
+    en cada fila de la operación. Detalles y límites del método en
+    :mod:`observatorio_inmobiliario.espacial`.
+    """
+    from observatorio_inmobiliario import espacial
+
+    if precios.empty or not geojson.get("features"):
+        return _clusteres_vacia()
+    codigos, geometrias = espacial.geometrias_del_catalogo(geojson)
+    posicion = {codigo: i for i, codigo in enumerate(codigos)}
+    vecinos = espacial.vecinos_por_contiguidad(geometrias)
+    partes = []
+    for operacion in ("venta", "arriendo"):
+        filas = precios[
+            (precios["nivel"] == "barrio")
+            & (precios["operacion"] == operacion)
+            & (precios["tipo"] == VIVIENDA)
+            & precios["precio_m2_mediana"].notna()
+            & precios["codigo"].isin(posicion)
+        ]
+        conservadas, locales = espacial.sin_islas(vecinos, [posicion[c] for c in filas["codigo"]])
+        if len(conservadas) < espacial.MINIMO_ZONAS:
+            continue
+        ficha = filas.set_index("codigo")
+        codigos_zona = [codigos[i] for i in conservadas]
+        medianas = ficha.loc[codigos_zona, "precio_m2_mediana"].astype("float64").to_numpy()
+        valores = np.log(medianas)
+        resultado = espacial.moran(valores, locales)
+        partes.append(
+            pd.DataFrame(
+                {
+                    "operacion": operacion,
+                    "codigo": codigos_zona,
+                    "nombre": ficha.loc[codigos_zona, "nombre"].to_numpy(),
+                    "comuna": ficha.loc[codigos_zona, "comuna"].to_numpy(),
+                    "precio_m2_mediana": medianas,
+                    "rezago_m2": np.exp(valores.mean() + resultado.rezago),
+                    "cluster": resultado.cluster,
+                    "p_local": resultado.p_local,
+                    "moran_i": resultado.i,
+                    "p_global": resultado.p,
+                    "barrios": len(codigos_zona),
+                }
+            )
+        )
+    if not partes:
+        return _clusteres_vacia()
+    tabla = pd.concat(partes, ignore_index=True).assign(semana=semana)
+    tabla = _enteros(tabla, ["precio_m2_mediana", "rezago_m2"])
+    tabla["barrios"] = tabla["barrios"].astype("Int64")
+    for columna in ("p_local", "moran_i", "p_global"):
+        tabla[columna] = tabla[columna].astype("float64").round(4)
+    tabla = tabla.astype({c: "string" for c in _TEXTO_CLUSTERES})
+    orden = tabla.sort_values(["operacion", "codigo"], kind="stable")
+    return orden[COLUMNAS_CLUSTERES].reset_index(drop=True)
+
+
+def precios_municipio(limpio: pd.DataFrame, semana: str) -> pd.DataFrame:
+    """Precio por m² de vivienda por municipio y para El Poblado y Laureles (comparación).
+
+    A diferencia del resto de las tablas de precios, **no se limita a Medellín**: usa los
+    anuncios únicos de todos los municipios, sin los atípicos. ``zona`` es el municipio (nivel
+    ``"municipio"``, incluido Medellín entero) o una de las comunas de :data:`ZONAS_DE_MEDELLIN`
+    (nivel ``"comuna"``, que también cuenta dentro de Medellín). ``estrato`` es el declarado o
+    ``"todos"``. Cada fila resume :data:`MINIMO_PUBLICACION` anuncios con precio por m² o más.
+    """
+    unicos = anuncios_unicos(limpio)
+    base = unicos[
+        ~unicos["es_atipico"].fillna(False).astype(bool) & unicos["municipio_normalizado"].notna()
+    ]
+    vivienda = con_vivienda(base[base["precio_m2"].notna()])
+    if vivienda.empty:
+        return _vacia(COLUMNAS_PRECIOS_MUNICIPIO, _TEXTO_PRECIOS_MUNICIPIO)
+    vivienda = vivienda.assign(precio_m2=vivienda["precio_m2"].astype("float64"))
+    en_medellin = vivienda["es_medellin"].fillna(False).astype(bool)
+    comunas = vivienda[en_medellin & vivienda["comuna"].isin(list(ZONAS_DE_MEDELLIN))]
+    zonas = pd.concat(
+        [
+            vivienda.assign(
+                nivel="municipio", zona=vivienda["municipio_normalizado"].astype("string")
+            ),
+            comunas.assign(nivel="comuna", zona=comunas["comuna"].map(ZONAS_DE_MEDELLIN)),
+        ],
+        ignore_index=True,
+    )
+    con_estrato = zonas[zonas["estrato"].notna()].assign(
+        estrato=lambda d: d["estrato"].astype("Int64").astype("string")
+    )
+    datos = pd.concat([zonas.assign(estrato=TODOS_LOS_ESTRATOS), con_estrato], ignore_index=True)
+    claves = ["nivel", "zona", "operacion", "tipo", "estrato"]
+    grupos = datos.astype({c: "string" for c in claves}).groupby(claves, observed=True)["precio_m2"]
+    tabla = pd.DataFrame(
+        {
+            "anuncios": grupos.count(),
+            "precio_m2_mediana": grupos.median(),
+            "precio_m2_p25": grupos.quantile(0.25),
+            "precio_m2_p75": grupos.quantile(0.75),
+        }
+    ).reset_index()
+    tabla = tabla[tabla["anuncios"] >= MINIMO_PUBLICACION].assign(semana=semana)
+    if tabla.empty:
+        return _vacia(COLUMNAS_PRECIOS_MUNICIPIO, _TEXTO_PRECIOS_MUNICIPIO)
+    tabla = _enteros(tabla, COLUMNAS_PRECIOS_MUNICIPIO[6:])
+    tabla = tabla.astype({c: "string" for c in _TEXTO_PRECIOS_MUNICIPIO})
+    orden = tabla.sort_values(claves, kind="stable")
+    return orden[COLUMNAS_PRECIOS_MUNICIPIO].reset_index(drop=True)

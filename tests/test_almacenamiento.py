@@ -366,7 +366,7 @@ def test_guardar_y_leer_agregado(tmp_path: Path) -> None:
 
 
 def test_tablas_agregadas() -> None:
-    assert len(TABLAS_AGREGADAS) == 16
+    assert len(TABLAS_AGREGADAS) == 18
     assert "grupos_compartidos" in TABLAS_AGREGADAS
 
 

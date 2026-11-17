@@ -1396,3 +1396,228 @@ def tabla_compartidas(compartidas: pd.DataFrame, nivel: str) -> pd.DataFrame:
     }
     tabla = filas.sort_values("pct_compartido", ascending=False)[list(columnas)]
     return tabla.rename(columns=columnas).reset_index(drop=True)
+
+
+# ------------------------------------------------------- Oportunidades y nichos
+
+
+def cobertura_barrios(cuota: pd.DataFrame, geojson: dict[str, Any], operacion: str) -> pd.DataFrame:
+    """Cada barrio del catálogo oficial con sus anuncios y las inmobiliarias que lo cubren."""
+    columnas = ["codigo", "nombre", "comuna", "zona", "anuncios", "inmobiliarias"]
+    catalogo = pd.DataFrame(
+        [
+            {
+                "codigo": str(f["properties"]["codigo"]),
+                "nombre": f["properties"].get("nombre_barrio"),
+                "comuna": f["properties"].get("comuna"),
+                "zona": f["properties"].get("indicador_ur"),
+            }
+            for f in geojson.get("features", [])
+        ],
+        columns=["codigo", "nombre", "comuna", "zona"],
+    )
+    filas = cuota[(cuota["nivel"] == "barrio") & (cuota["operacion"] == operacion)]
+    filas = filas.assign(anuncios=filas["anuncios"].astype("int64"))
+    cubiertos = filas.groupby("codigo").agg(
+        anuncios=("anuncios", "sum"), inmobiliarias=("fuente", "nunique")
+    )
+    tabla = catalogo.merge(cubiertos, left_on="codigo", right_index=True, how="left")
+    tabla = tabla.fillna({"anuncios": 0, "inmobiliarias": 0})
+    tabla = tabla.astype({"anuncios": "int64", "inmobiliarias": "int64"})
+    return tabla[columnas]
+
+
+def resumen_cobertura(cobertura: pd.DataFrame) -> dict[str, int]:
+    """Barrios urbanos sin anuncios, con una inmobiliaria, con dos y con tres o más."""
+    urbanos = cobertura[cobertura["zona"] == "U"]
+    return {
+        "urbanos": len(urbanos),
+        "sin_anuncios": int((urbanos["inmobiliarias"] == 0).sum()),
+        "una": int((urbanos["inmobiliarias"] == 1).sum()),
+        "dos": int((urbanos["inmobiliarias"] == 2).sum()),
+        "tres_o_mas": int((urbanos["inmobiliarias"] >= 3).sum()),
+    }
+
+
+def mapa_cobertura(cuota: pd.DataFrame, geojson: dict[str, Any], operacion: str) -> go.Figure:
+    """Mapa de cuántas inmobiliarias publican en cada barrio (0 = sin cobertura)."""
+    titulo = f"Inmobiliarias con anuncios de {operacion} en cada barrio"
+    datos = cobertura_barrios(cuota, geojson, operacion)
+    if datos.empty or cuota.empty:
+        return _sin_datos(titulo)
+    figura = px.choropleth_map(
+        datos,
+        geojson=geojson,
+        locations="codigo",
+        featureidkey="properties.codigo",
+        color="inmobiliarias",
+        color_continuous_scale="YlGnBu",
+        hover_name="nombre",
+        hover_data={"codigo": False, "anuncios": True, "inmobiliarias": True},
+        labels={"inmobiliarias": "Inmobiliarias", "anuncios": "Anuncios"},
+        center=CENTRO_MEDELLIN,
+        zoom=10.5,
+        opacity=0.75,
+        map_style="carto-positron",
+    )
+    figura.update_layout(title=titulo, margin={"l": 0, "r": 0, "t": 40, "b": 0})
+    return figura
+
+
+def tabla_nichos(
+    cuota: pd.DataFrame, geojson: dict[str, Any], operacion: str, maximo: int
+) -> pd.DataFrame:
+    """Barrios urbanos con ``maximo`` inmobiliarias o menos, los menos cubiertos primero."""
+    cobertura = cobertura_barrios(cuota, geojson, operacion)
+    nichos = cobertura[(cobertura["zona"] == "U") & (cobertura["inmobiliarias"] <= maximo)]
+    if nichos.empty:
+        return pd.DataFrame()
+    nichos = nichos.sort_values(["inmobiliarias", "anuncios", "nombre"])
+    return nichos[["nombre", "comuna", "anuncios", "inmobiliarias"]].rename(
+        columns={
+            "nombre": "Barrio",
+            "comuna": "Comuna",
+            "anuncios": "Anuncios",
+            "inmobiliarias": "Inmobiliarias",
+        }
+    )
+
+
+def cobertura_estratos(cobertura: pd.DataFrame, operacion: str) -> go.Figure:
+    """Anuncios que declaran cada estrato en toda la ciudad, y cuántas inmobiliarias los tienen."""
+    titulo = f"{operacion.title()}: anuncios por estrato declarado"
+    filas = cobertura[(cobertura["nivel"] == NIVEL_CIUDAD) & (cobertura["operacion"] == operacion)]
+    if filas.empty:
+        return _sin_datos(titulo)
+    filas = filas.assign(
+        anuncios=filas["anuncios"].astype("int64"),
+        inmobiliarias=filas["inmobiliarias"].astype("int64"),
+    )
+    figura = px.bar(
+        filas,
+        x="estrato",
+        y="anuncios",
+        color="inmobiliarias",
+        color_continuous_scale="YlGnBu",
+        hover_data={"anuncios": True, "inmobiliarias": True},
+        labels={"estrato": "Estrato", "anuncios": "Anuncios", "inmobiliarias": "Inmobiliarias"},
+        template=_PLANTILLA,
+    )
+    figura.update_layout(title=titulo)
+    return figura
+
+
+def estratos_por_comuna(cobertura: pd.DataFrame, operacion: str) -> go.Figure:
+    """Mapa de calor de anuncios por comuna (filas) y estrato (columnas); 0 es sin anuncios."""
+    titulo = f"{operacion.title()}: anuncios por comuna y estrato"
+    filas = cobertura[(cobertura["nivel"] == "comuna") & (cobertura["operacion"] == operacion)]
+    if filas.empty:
+        return _sin_datos(titulo)
+    tabla = (
+        filas.assign(anuncios=filas["anuncios"].astype("int64"))
+        .pivot_table(
+            index="nombre", columns="estrato", values="anuncios", aggfunc="sum", fill_value=0
+        )
+        .reindex(columns=["1", "2", "3", "4", "5", "6"], fill_value=0)
+    )
+    tabla.index = [str(n).title() for n in tabla.index]
+    figura = px.imshow(
+        tabla,
+        text_auto=True,
+        aspect="auto",
+        color_continuous_scale="YlGnBu",
+        labels={"x": "Estrato", "y": "Comuna", "color": "Anuncios"},
+    )
+    figura.update_layout(title=titulo, template=_PLANTILLA, height=max(450, 26 * len(tabla)))
+    return figura
+
+
+def _desvio(desvio: pd.DataFrame, nivel: str, operacion: str) -> pd.DataFrame:
+    filas = desvio[(desvio["nivel"] == nivel) & (desvio["operacion"] == operacion)]
+    return filas.assign(
+        anuncios=filas["anuncios"].astype("int64"),
+        bajo=filas["bajo"].astype("int64"),
+        alto=filas["alto"].astype("int64"),
+        pct_bajo=filas["pct_bajo"].astype("float64"),
+        pct_alto=filas["pct_alto"].astype("float64"),
+    )
+
+
+def resumen_desvio(desvio: pd.DataFrame, operacion: str) -> dict[str, float] | None:
+    """% de anuncios bajo y sobre el mercado de su barrio en toda la ciudad."""
+    ciudad = _desvio(desvio, NIVEL_CIUDAD, operacion)
+    if ciudad.empty:
+        return None
+    fila = ciudad.iloc[0]
+    return {
+        "anuncios": float(fila["anuncios"]),
+        "pct_bajo": float(fila["pct_bajo"]),
+        "pct_alto": float(fila["pct_alto"]),
+    }
+
+
+def desvio_zonas(
+    desvio: pd.DataFrame, operacion: str, sentido: str, cuantos: int = 15
+) -> go.Figure:
+    """Los barrios con mayor % de anuncios bajo (``"bajo"``) o sobre (``"alto"``) su mercado."""
+    texto = "por debajo" if sentido == "bajo" else "por encima"
+    titulo = f"{operacion.title()}: barrios con más anuncios {texto} del mercado de su barrio"
+    filas = _desvio(desvio, "barrio", operacion)
+    if filas.empty:
+        return _sin_datos(titulo)
+    columna = f"pct_{sentido}"
+    filas = filas.sort_values(columna).tail(cuantos)
+    figura = px.bar(
+        filas,
+        x=columna,
+        y="nombre",
+        orientation="h",
+        hover_data={"anuncios": True, sentido: True, columna: ":.1f"},
+        labels={columna: f"% de sus anuncios {texto} del mercado", "nombre": "Barrio"},
+        template=_PLANTILLA,
+    )
+    figura.update_traces(marker_color="#2c7fb8" if sentido == "bajo" else "#d95f0e")
+    figura.update_layout(title=titulo, height=max(400, 24 * len(filas)))
+    return figura
+
+
+def desvio_inmobiliarias(desvio: pd.DataFrame, operacion: str) -> go.Figure:
+    """% de anuncios de cada inmobiliaria bajo y sobre el mercado de su barrio."""
+    titulo = f"{operacion.title()}: anuncios bajo y sobre el mercado de su barrio, por inmobiliaria"
+    filas = _desvio(desvio, "fuente", operacion)
+    if filas.empty:
+        return _sin_datos(titulo)
+    figura = go.Figure()
+    for nombre, columna, color in (
+        ("Bajo el mercado", "pct_bajo", "#2c7fb8"),
+        ("Sobre el mercado", "pct_alto", "#d95f0e"),
+    ):
+        figura.add_bar(
+            x=filas["nombre"],
+            y=filas[columna],
+            name=nombre,
+            marker_color=color,
+            customdata=filas[["anuncios"]],
+            hovertemplate="%{x}: %{y:.1f} % (de %{customdata[0]} anuncios)<extra></extra>",
+        )
+    figura.update_layout(
+        title=titulo, template=_PLANTILLA, barmode="group", yaxis_title="% de sus anuncios"
+    )
+    return figura
+
+
+def tabla_desvio(desvio: pd.DataFrame, operacion: str) -> pd.DataFrame:
+    """Todos los barrios con su conteo de anuncios bajo y sobre el mercado."""
+    filas = _desvio(desvio, "barrio", operacion)
+    if filas.empty:
+        return pd.DataFrame()
+    columnas = {
+        "nombre": "Barrio",
+        "comuna": "Comuna",
+        "anuncios": "Anuncios comparables",
+        "bajo": "Bajo",
+        "alto": "Sobre",
+        "pct_bajo": "Bajo (%)",
+        "pct_alto": "Sobre (%)",
+    }
+    return filas.sort_values("pct_bajo", ascending=False)[list(columnas)].rename(columns=columnas)

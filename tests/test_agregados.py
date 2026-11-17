@@ -5,18 +5,22 @@ import pytest
 
 from conftest import fila
 from observatorio_inmobiliario.agregados import (
+    COLUMNAS_COBERTURA_ESTRATO,
     COLUMNAS_COMPARTIDAS,
+    COLUMNAS_DESVIO,
     MINIMO_PARES_PRECIO,
     NIVELES,
     anuncios_unicos,
     base_analisis,
     calidad_inmobiliaria,
     cobertura_comuna,
+    cobertura_estrato,
     cobertura_inmobiliaria,
     compartidas_inmobiliaria,
     compartidos_fuentes,
     con_vivienda,
     cuota_zona,
+    desvio_precio,
     distribucion_oferta,
     economia_inmobiliaria,
     estrato_inferido,
@@ -1084,3 +1088,106 @@ def test_compartidas_vacia(limpio: Any) -> None:
     assert list(tabla.columns) == COLUMNAS_COMPARTIDAS
     assert str(tabla["compartidos"].dtype) == "Int64"
     assert str(tabla["pct_compartido"].dtype) == "float64"
+
+
+# ------------------------------------------------------- Oportunidades y nichos
+
+
+def _con_precios_m2(
+    valores: list[float], prefijo: str = "x", **cambios: Any
+) -> list[dict[str, Any]]:
+    return [
+        fila(id_fuente=f"{prefijo}-{i}", precio_m2=v, precio=int(v * 80), **cambios)
+        for i, v in enumerate(valores)
+    ]
+
+
+def _desvio_de(tabla: pd.DataFrame, nivel: str, codigo: str, operacion: str = "arriendo") -> Any:
+    filas = tabla[
+        (tabla["nivel"] == nivel) & (tabla["codigo"] == codigo) & (tabla["operacion"] == operacion)
+    ]
+    assert len(filas) == 1, (nivel, codigo, operacion, len(filas))
+    return filas.iloc[0]
+
+
+def test_desvio_precio_cuenta_bajo_y_sobre(limpio: Any) -> None:
+    # mediana 100.000: 70.000 es 0,7 (bajo), 130.000 es 1,3 (sobre), 80.000 y 120.000 son el límite
+    filas = _con_precios_m2([70_000, 80_000, 100_000, 120_000, 130_000])
+    tabla = desvio_precio(base_analisis(limpio(*filas)), SEMANA)
+
+    barrio = _desvio_de(tabla, "barrio", "1101")
+    assert barrio["nombre"] == "Laureles"
+    assert barrio["comuna"] == "11"
+    assert (barrio["anuncios"], barrio["bajo"], barrio["alto"]) == (5, 2, 2)
+    assert barrio["pct_bajo"] == 40.0
+    assert barrio["pct_alto"] == 40.0
+    assert _desvio_de(tabla, "ciudad", "ciudad")["anuncios"] == 5
+    assert _desvio_de(tabla, "fuente", "santafe")["bajo"] == 2
+    assert set(tabla["semana"]) == {SEMANA}
+
+
+def test_desvio_precio_exige_comparables(limpio: Any) -> None:
+    tabla = desvio_precio(
+        base_analisis(limpio(*_con_precios_m2([70_000, 100_000, 130_000]))), SEMANA
+    )
+    assert tabla.empty  # con menos de 5 anuncios el barrio no tiene mediana de mercado
+
+
+def test_desvio_precio_separa_operacion_y_vivienda(limpio: Any) -> None:
+    filas = [
+        *_con_precios_m2([70_000, 80_000, 100_000, 120_000, 130_000], "a"),
+        *_con_precios_m2([1, 2, 3, 4, 5], "v", operacion="venta"),
+        *_con_precios_m2([1, 2, 3, 4, 5], "l", tipo_normalizado="local"),
+    ]
+    tabla = desvio_precio(base_analisis(limpio(*filas)), SEMANA)
+    assert _desvio_de(tabla, "barrio", "1101", "arriendo")["anuncios"] == 5
+    assert _desvio_de(tabla, "barrio", "1101", "venta")["anuncios"] == 5
+    assert (tabla["anuncios"] <= 5).all()  # el local no cuenta
+
+
+def test_desvio_precio_sin_columnas_de_anuncio(limpio: Any) -> None:
+    tabla = desvio_precio(base_analisis(limpio(*_con_precios_m2([1, 2, 3, 4, 5]))), SEMANA)
+    assert not {"id_fuente", "url", "latitud", "longitud"} & set(tabla.columns)
+    assert list(tabla.columns) == COLUMNAS_DESVIO
+
+
+def test_desvio_precio_vacio(limpio: Any) -> None:
+    tabla = desvio_precio(base_analisis(limpio()), SEMANA)
+    assert tabla.empty
+    assert list(tabla.columns) == COLUMNAS_DESVIO
+    assert str(tabla["bajo"].dtype) == "Int64"
+    assert str(tabla["pct_bajo"].dtype) == "float64"
+
+
+def test_cobertura_estrato(limpio: Any) -> None:
+    filas = [
+        *_anuncios(3, "a", estrato=4),
+        *_anuncios(1, "b", fuente="alnago", estrato=4),
+        *_anuncios(2, "c", estrato=3),
+        *_anuncios(5, "d", estrato=None),
+    ]
+    tabla = cobertura_estrato(base_analisis(limpio(*filas)), SEMANA)
+
+    def celda(nivel: str, codigo: str, estrato: str) -> Any:
+        f = tabla[
+            (tabla["nivel"] == nivel)
+            & (tabla["codigo"] == codigo)
+            & (tabla["operacion"] == "todas")
+            & (tabla["estrato"] == estrato)
+        ]
+        assert len(f) == 1
+        return f.iloc[0]
+
+    assert (
+        celda("ciudad", "ciudad", "4")["anuncios"],
+        celda("ciudad", "ciudad", "4")["inmobiliarias"],
+    ) == (4, 2)
+    assert celda("comuna", "11", "3")["anuncios"] == 2
+    assert set(tabla["estrato"]) == {"3", "4"}  # sin estrato declarado no cuenta
+    assert list(tabla.columns) == COLUMNAS_COBERTURA_ESTRATO
+
+
+def test_cobertura_estrato_vacia(limpio: Any) -> None:
+    tabla = cobertura_estrato(base_analisis(limpio()), SEMANA)
+    assert tabla.empty
+    assert list(tabla.columns) == COLUMNAS_COBERTURA_ESTRATO

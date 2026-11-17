@@ -1,4 +1,5 @@
 from pathlib import Path
+from typing import Any
 
 import pandas as pd
 import plotly.graph_objects as go
@@ -138,6 +139,10 @@ def _llamadas(tablas: dict[str, pd.DataFrame]) -> list[go.Figure]:
         graficas.compartidas_por_inmobiliaria(tablas["compartidas_inmobiliaria"], "media"),
         graficas.matriz_compartidas(tablas["compartidas_inmobiliaria"], "alta"),
         graficas.precio_relativo(tablas["compartidas_inmobiliaria"], "media"),
+        graficas.cobertura_estratos(tablas["cobertura_estrato"], "venta"),
+        graficas.estratos_por_comuna(tablas["cobertura_estrato"], "venta"),
+        graficas.desvio_zonas(tablas["desvio_precio"], "venta", "bajo"),
+        graficas.desvio_inmobiliarias(tablas["desvio_precio"], "arriendo"),
     ]
 
 
@@ -474,6 +479,99 @@ def test_tabla_compartidas(reales: dict[str, pd.DataFrame]) -> None:
 def test_compartidas_vacias(vacias: dict[str, pd.DataFrame]) -> None:
     assert graficas.resumen_compartidas(vacias["compartidas_inmobiliaria"], "alta") is None
     assert graficas.tabla_compartidas(vacias["compartidas_inmobiliaria"], "alta").empty
+
+
+def _geojson_corto() -> dict[str, Any]:
+    barrios = [
+        ("0101", "Uno", "U"),
+        ("0102", "Dos", "U"),
+        ("0103", "Tres", "U"),
+        ("9001", "Vereda", "R"),
+    ]
+    return {
+        "features": [
+            {"properties": {"codigo": c, "nombre_barrio": n, "comuna": "01", "indicador_ur": z}}
+            for c, n, z in barrios
+        ]
+    }
+
+
+def _cuota_corta() -> pd.DataFrame:
+    filas = [
+        ("0101", "a", 4),
+        ("0101", "b", 2),  # dos inmobiliarias
+        ("0102", "a", 3),  # una sola
+    ]
+    return pd.DataFrame(
+        [
+            {
+                "nivel": "barrio",
+                "codigo": c,
+                "nombre": c,
+                "comuna": "01",
+                "operacion": "venta",
+                "fuente": f,
+                "anuncios": n,
+            }
+            for c, f, n in filas
+        ]
+    ).astype({"anuncios": "Int64"})
+
+
+def test_cobertura_barrios_incluye_los_sin_anuncios() -> None:
+    cobertura = graficas.cobertura_barrios(_cuota_corta(), _geojson_corto(), "venta")
+    assert len(cobertura) == 4
+    por_codigo = cobertura.set_index("codigo")
+    assert por_codigo.loc["0101", "inmobiliarias"] == 2
+    assert por_codigo.loc["0101", "anuncios"] == 6
+    assert por_codigo.loc["0103", "inmobiliarias"] == 0
+    resumen = graficas.resumen_cobertura(cobertura)
+    assert resumen == {"urbanos": 3, "sin_anuncios": 1, "una": 1, "dos": 1, "tres_o_mas": 0}
+
+
+def test_tabla_nichos_solo_urbanos_y_menos_cubiertos_primero() -> None:
+    tabla = graficas.tabla_nichos(_cuota_corta(), _geojson_corto(), "venta", 1)
+    assert list(tabla["Barrio"]) == ["Tres", "Dos"]  # la vereda rural no cuenta
+    assert list(tabla["Inmobiliarias"]) == [0, 1]
+    assert graficas.tabla_nichos(_cuota_corta(), _geojson_corto(), "arriendo", 0).shape[0] == 3
+
+
+def test_nichos_con_datos_reales(reales: dict[str, pd.DataFrame]) -> None:
+    geojson = cargar_geojson()
+    cuota, estratos = reales["cuota_zona"], reales["cobertura_estrato"]
+    cobertura = graficas.cobertura_barrios(cuota, geojson, "venta")
+    assert len(cobertura) == 349
+    resumen = graficas.resumen_cobertura(cobertura)
+    assert (
+        resumen["sin_anuncios"] + resumen["una"] + resumen["dos"] + resumen["tres_o_mas"]
+        == (resumen["urbanos"])
+    )
+    assert graficas.mapa_cobertura(cuota, geojson, "venta").data
+    assert graficas.cobertura_estratos(estratos, "venta").data
+    assert graficas.estratos_por_comuna(estratos, "arriendo").data
+
+
+def test_desvio_con_datos_reales(reales: dict[str, pd.DataFrame]) -> None:
+    desvio = reales["desvio_precio"]
+    for operacion in ("venta", "arriendo"):
+        resumen = graficas.resumen_desvio(desvio, operacion)
+        assert resumen is not None
+        assert 0 < resumen["pct_bajo"] < 100 and 0 < resumen["pct_alto"] < 100
+        assert graficas.desvio_zonas(desvio, operacion, "bajo").data
+        assert graficas.desvio_zonas(desvio, operacion, "alto").data
+        assert graficas.desvio_inmobiliarias(desvio, operacion).data
+    tabla = graficas.tabla_desvio(desvio, "venta")
+    assert tabla["Bajo (%)"].is_monotonic_decreasing
+    assert (tabla["Bajo"] <= tabla["Anuncios comparables"]).all()
+    assert (tabla["Anuncios comparables"] >= MINIMO_PUBLICACION).all()
+
+
+def test_nichos_vacios(vacias: dict[str, pd.DataFrame]) -> None:
+    assert graficas.resumen_desvio(vacias["desvio_precio"], "venta") is None
+    assert graficas.tabla_desvio(vacias["desvio_precio"], "venta").empty
+    assert graficas.desvio_zonas(vacias["desvio_precio"], "venta", "bajo").layout.title.text
+    assert graficas.cobertura_estratos(vacias["cobertura_estrato"], "venta").layout.title.text
+    assert graficas.tabla_nichos(vacias["cuota_zona"], _geojson_corto(), "venta", 1).shape[0] == 3
 
 
 # ---------------------------------------------------------------- Formato

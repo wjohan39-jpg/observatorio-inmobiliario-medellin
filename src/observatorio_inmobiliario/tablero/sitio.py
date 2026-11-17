@@ -13,7 +13,7 @@ from typing import Any, Final
 import pandas as pd
 import plotly.graph_objects as go
 
-from observatorio_inmobiliario.agregados import MINIMO_PARES_PRECIO
+from observatorio_inmobiliario.agregados import MINIMO_PARES_PRECIO, UMBRAL_ALTO, UMBRAL_BAJO
 from observatorio_inmobiliario.reputacion import reconocimiento
 from observatorio_inmobiliario.tablero import graficas
 from observatorio_inmobiliario.tablero.formato import entero, indicadores
@@ -84,7 +84,7 @@ def _seccion(id_: str, titulo: str, contenido: list[str]) -> str:
 
 
 def generar_sitio(tablas: dict[str, pd.DataFrame], geojson: dict[str, Any], salida: Path) -> Path:
-    """Escribe ``salida/index.html`` con las 9 secciones del dashboard y devuelve su ruta."""
+    """Escribe ``salida/index.html`` con las 10 secciones del dashboard y devuelve su ruta."""
     figura = _Graficas()
     cobertura = tablas["cobertura_inmobiliaria"]
     semana = str(cobertura["semana"].iloc[0]) if not cobertura.empty else "sin datos"
@@ -240,6 +240,50 @@ def generar_sitio(tablas: dict[str, pd.DataFrame], geojson: dict[str, Any], sali
             "descripciones no se miden porque el proyecto no las guarda.</p>",
         ],
     )
+    desvio, cobertura_est = tablas["desvio_precio"], tablas["cobertura_estrato"]
+    cobertura_zonas = graficas.cobertura_barrios(cuota, geojson, "venta")
+    sin_cobertura = graficas.resumen_cobertura(cobertura_zonas)
+    nichos = _seccion(
+        "nichos",
+        "Oportunidades y nichos",
+        [
+            "<p>Sobre el inventario de las 9 inmobiliarias que se scrapean, no sobre todo el "
+            "mercado. Es una orientación para investigar, no una recomendación de compra.</p>",
+            "<h3>Nichos: barrios con poca cobertura</h3>",
+            f"<p>De {entero(sin_cobertura['urbanos'])} barrios urbanos de venta, "
+            f"<b>{entero(sin_cobertura['sin_anuncios'])}</b> no tienen anuncios y "
+            f"<b>{entero(sin_cobertura['una'])}</b> los cubre una sola inmobiliaria.</p>",
+            figura(graficas.mapa_cobertura(cuota, geojson, "venta")),
+            figura(graficas.mapa_cobertura(cuota, geojson, "arriendo")),
+            "<p>«Sin cobertura» es sin anuncios de estas 9 inmobiliarias: puede ser un barrio "
+            "poco residencial o con oferta de particulares. Solo los anuncios con coordenadas "
+            "válidas se ubican en un barrio.</p>",
+            "<h4>Barrios con una inmobiliaria o ninguna (venta)</h4>",
+            _tabla(graficas.tabla_nichos(cuota, geojson, "venta", 1)),
+            figura(graficas.cobertura_estratos(cobertura_est, "venta")),
+            figura(graficas.estratos_por_comuna(cobertura_est, "venta")),
+            "<p>Solo cuentan los anuncios que declaran estrato. Un 0 no prueba que ese estrato "
+            "exista en esa comuna.</p>",
+            "<h3>Anuncios bajo o sobre el mercado de su barrio</h3>",
+            f"<p>Precio por m² de {int(UMBRAL_BAJO * 100)} % o menos de la mediana de su "
+            f"barrio (bajo), o de {int(UMBRAL_ALTO * 100)} % o más (sobre), en la misma "
+            "operación y tipo y con 5 comparables o más. Son conteos: no se publica ningún "
+            "anuncio concreto.</p>",
+            figura(graficas.desvio_zonas(desvio, "venta", "bajo")),
+            figura(graficas.desvio_zonas(desvio, "venta", "alto")),
+            figura(graficas.desvio_inmobiliarias(desvio, "venta")),
+            figura(graficas.desvio_inmobiliarias(desvio, "arriendo")),
+            _aviso(
+                "Un precio bajo no prueba una ganga ni uno alto una sobrevaloración: no se "
+                "conoce el estado, el piso, la antigüedad ni las alcobas. Cerca de 1 de cada 5 "
+                "anuncios queda por cada lado por la dispersión normal de los precios."
+            ),
+            "<h3>Inversión: precio y rentabilidad por barrio</h3>",
+            figura(graficas.rentabilidad_barrios(precios)),
+            "<p>Rentabilidad bruta sin administración, impuestos ni vacancia. Falta la "
+            "liquidez, que necesita varias semanas de datos.</p>",
+        ],
+    )
     indice = reconocimiento(cobertura, None)
     inmobiliarias = _seccion(
         "inmobiliarias",
@@ -336,12 +380,12 @@ Datos de la semana <b>{escape(semana)}</b>.</div>
 </header>
 <nav>
 <a href="#resumen">Resumen</a><a href="#barrios">Barrios</a><a href="#precios">Precios</a>
-<a href="#oferta">Oferta</a><a href="#cuota">Cuota</a>
+<a href="#oferta">Oferta</a><a href="#cuota">Cuota</a><a href="#nichos">Nichos</a>
 <a href="#inmobiliarias">Inmobiliarias</a><a href="#compartidos">Compartidas</a>
 <a href="#evolucion">Evolución</a><a href="#metodologia">Metodología</a>
 </nav>
 <main>
-{resumen}{barrios}{analisis}{movimiento}{cuota_agencias}{inmobiliarias}{compartidos}{evolucion}{metodologia}
+{resumen}{barrios}{analisis}{movimiento}{cuota_agencias}{nichos}{inmobiliarias}{compartidos}{evolucion}{metodologia}
 </main>
 <footer>Generado a partir de <code>data/agregados/</code> ·
 <a href="{REPOSITORIO}">Código en GitHub</a></footer>

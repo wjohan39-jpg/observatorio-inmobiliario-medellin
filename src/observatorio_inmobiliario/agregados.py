@@ -1083,3 +1083,134 @@ def compartidas_inmobiliaria(
     tabla["orden"] = tabla["nivel"].map(NIVELES.index)
     tabla = tabla.sort_values(["orden", "fuente", "otra"], kind="stable")
     return _tipar(tabla, COLUMNAS_COMPARTIDAS, _TIPOS_COMPARTIDAS)
+
+
+# ------------------------------------------------------- Oportunidades y nichos
+
+UMBRAL_BAJO: Final = 0.8
+UMBRAL_ALTO: Final = 1.2
+"""Un anuncio está «bajo el mercado» si su precio por m² es el 80 % de la mediana de su barrio
+o menos, y «sobre el mercado» si es el 120 % o más. La mediana es la de su operación, tipo y
+barrio, y solo se usa con 5 comparables o más (:func:`indice_relativo`)."""
+
+COLUMNAS_DESVIO: Final = [
+    "semana",
+    "nivel",
+    "codigo",
+    "nombre",
+    "comuna",
+    "operacion",
+    "anuncios",
+    "bajo",
+    "alto",
+    "pct_bajo",
+    "pct_alto",
+]
+_TEXTO_DESVIO: Final = COLUMNAS_DESVIO[:6]
+COLUMNAS_COBERTURA_ESTRATO: Final = [
+    "semana",
+    "nivel",
+    "codigo",
+    "nombre",
+    "operacion",
+    "estrato",
+    "anuncios",
+    "inmobiliarias",
+]
+_TEXTO_COBERTURA_ESTRATO: Final = COLUMNAS_COBERTURA_ESTRATO[:6]
+
+
+def _desvio_vacio() -> pd.DataFrame:
+    return _vacia(COLUMNAS_DESVIO, _TEXTO_DESVIO).astype(
+        {"pct_bajo": "float64", "pct_alto": "float64"}
+    )
+
+
+def desvio_precio(base: pd.DataFrame, semana: str) -> pd.DataFrame:
+    """Cuántos anuncios de vivienda están bajo o sobre el precio de mercado de su barrio.
+
+    Es un conteo agregado: nunca identifica un anuncio. ``anuncios`` son los que tienen
+    índice de precio relativo (:func:`indice_relativo`); ``bajo`` y ``alto`` los que superan
+    :data:`UMBRAL_BAJO` y :data:`UMBRAL_ALTO`. Una fila por barrio (con
+    :data:`MINIMO_PUBLICACION` anuncios o más), por inmobiliaria y para toda la ciudad, y por
+    operación. Un precio bajo no prueba una ganga: el índice no conoce el estado, el piso ni la
+    antigüedad del inmueble.
+    """
+    indice = indice_relativo(base)
+    datos = base.assign(indice=indice)[indice.notna()]
+    if datos.empty:
+        return _desvio_vacio()
+    datos = datos.assign(
+        bajo=(datos["indice"] <= UMBRAL_BAJO).astype(int),
+        alto=(datos["indice"] >= UMBRAL_ALTO).astype(int),
+        ciudad=NIVEL_CIUDAD,
+    )
+    partes = []
+    for nivel, claves, nombres in (
+        ("barrio", ["codigo_barrio", "operacion"], "barrio_normalizado"),
+        ("fuente", ["fuente", "operacion"], None),
+        (NIVEL_CIUDAD, ["ciudad", "operacion"], None),
+    ):
+        grupos = datos.groupby(claves, observed=True)
+        resumen = pd.DataFrame(
+            {"anuncios": grupos.size(), "bajo": grupos["bajo"].sum(), "alto": grupos["alto"].sum()}
+        ).reset_index()
+        resumen = resumen.rename(columns={claves[0]: "codigo"})
+        if nombres is None:
+            resumen["nombre"] = resumen["codigo"]
+            resumen["comuna"] = pd.NA
+        else:
+            ficha = datos.drop_duplicates(claves[0]).set_index(claves[0])
+            resumen["nombre"] = resumen["codigo"].map(ficha[nombres])
+            resumen["comuna"] = resumen["codigo"].map(ficha["comuna"])
+        partes.append(resumen.assign(nivel=nivel))
+    tabla = pd.concat(partes, ignore_index=True)
+    tabla = tabla[tabla["anuncios"] >= MINIMO_PUBLICACION].assign(semana=semana)
+    if tabla.empty:
+        return _desvio_vacio()
+    tabla["pct_bajo"] = (tabla["bajo"] / tabla["anuncios"] * 100).round(1)
+    tabla["pct_alto"] = (tabla["alto"] / tabla["anuncios"] * 100).round(1)
+    tabla = tabla.astype({c: "string" for c in _TEXTO_DESVIO})
+    for columna in ("anuncios", "bajo", "alto"):
+        tabla[columna] = tabla[columna].astype("Int64")
+    orden = tabla.sort_values(["nivel", "codigo", "operacion"], kind="stable")
+    return orden[COLUMNAS_DESVIO].reset_index(drop=True)
+
+
+def cobertura_estrato(base: pd.DataFrame, semana: str) -> pd.DataFrame:
+    """Anuncios e inmobiliarias por estrato declarado, para la ciudad y cada comuna.
+
+    Solo cuenta los anuncios que declaran estrato (cerca del 64 %). Son conteos, sin mínimo de
+    publicación. Una celda que no aparece no tiene anuncios; no dice si en esa comuna existe
+    ese estrato, porque el proyecto no tiene el estrato oficial de cada zona.
+    """
+    datos = _con_todas(base[base["estrato"].notna()])
+    if datos.empty:
+        return _vacia(COLUMNAS_COBERTURA_ESTRATO, _TEXTO_COBERTURA_ESTRATO)
+    ciudad = pd.Series(NIVEL_CIUDAD, index=datos.index, dtype="string")
+    con_comuna = datos[datos["comuna"].notna()]
+    partes = []
+    for nivel, filas, codigo, nombre in (
+        (NIVEL_CIUDAD, datos, ciudad, ciudad),
+        ("comuna", con_comuna, con_comuna["comuna"], con_comuna["nombre_comuna"]),
+    ):
+        claves = pd.DataFrame(
+            {
+                "codigo": codigo.astype("string"),
+                "nombre": nombre.astype("string"),
+                "operacion": filas["operacion"].astype("string"),
+                "estrato": filas["estrato"].astype("Int64").astype("string"),
+                "fuente": filas["fuente"].astype("string"),
+            }
+        )
+        grupos = claves.groupby(["codigo", "nombre", "operacion", "estrato"], observed=True)
+        resumen = pd.DataFrame(
+            {"anuncios": grupos.size(), "inmobiliarias": grupos["fuente"].nunique()}
+        ).reset_index()
+        partes.append(resumen.assign(nivel=nivel))
+    tabla = pd.concat(partes, ignore_index=True).assign(semana=semana)
+    tabla = tabla.astype({c: "string" for c in _TEXTO_COBERTURA_ESTRATO})
+    for columna in ("anuncios", "inmobiliarias"):
+        tabla[columna] = tabla[columna].astype("Int64")
+    orden = tabla.sort_values(["nivel", "codigo", "operacion", "estrato"], kind="stable")
+    return orden[COLUMNAS_COBERTURA_ESTRATO].reset_index(drop=True)

@@ -419,6 +419,8 @@ def _agregados(limpio: Path, compartidos: Path, salida: Path) -> int:
         "cuota_zona": agregados.cuota_zona(base, semana),
         "perfil_inmobiliaria": agregados.perfil_inmobiliaria(base, semana),
         "calidad_inmobiliaria": agregados.calidad_inmobiliaria(base, semana),
+        "desvio_precio": agregados.desvio_precio(base, semana),
+        "cobertura_estrato": agregados.cobertura_estrato(base, semana),
         "compartidas_inmobiliaria": agregados.compartidas_inmobiliaria(
             parejas, grupos, base, semana
         ),

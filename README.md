@@ -158,6 +158,8 @@ Resume la última semana limpia y todo el histórico en `data/agregados/`. **Son
 | `cuota_zona` | Cuota y concentración | Anuncios de cada inmobiliaria por barrio, comuna y ciudad y por operación; de ahí salen la cuota y el HHI |
 | `perfil_inmobiliaria` | Perfil | Anuncios de cada inmobiliaria por operación y tipo de inmueble |
 | `calidad_inmobiliaria` | Calidad de datos | % de anuncios de vivienda que trae área, alcobas, baños, parqueaderos, estrato, coordenadas y barrio |
+| `desvio_precio` | Oportunidades | Cuántos anuncios de vivienda están bajo (≤ 80 %) o sobre (≥ 120 %) la mediana de su barrio, por barrio, inmobiliaria y ciudad; son conteos, sin anuncios concretos |
+| `cobertura_estrato` | Nichos | Anuncios e inmobiliarias por estrato declarado, para la ciudad y cada comuna |
 | `cobertura_inmobiliaria` | 2 y 6. Cobertura y reconocimiento | Anuncios, barrios y comunas de cada inmobiliaria, y su comuna principal |
 | `cobertura_comuna` | 2. Dónde se concentra | % de los anuncios de cada inmobiliaria en cada comuna |
 | `economia_inmobiliaria` | 3. Economía | Medianas de precio e índice de precio relativo a su barrio |
@@ -209,7 +211,7 @@ uv run --group analisis jupyter nbconvert --to notebook --execute --inplace note
 El dashboard tiene dos versiones con la misma información. Las dos leen solo `data/agregados/`, así que nunca muestran ids, enlaces ni coordenadas de anuncios.
 
 - **Sitio estático en GitHub Pages:** es el link de arriba. GitHub Actions (`.github/workflows/pages.yml`) lo genera con `observatorio sitio` y lo publica cada vez que cambian los datos agregados. Las gráficas son interactivas: zoom y detalle al pasar el mouse.
-- **App de Streamlit** (`app/`): 9 páginas con selectores. Se corre en local:
+- **App de Streamlit** (`app/`): 10 páginas con selectores. Se corre en local:
 
   ```bash
   uv run streamlit run app/Inicio.py
@@ -222,6 +224,7 @@ El dashboard tiene dos versiones con la misma información. Las dos leen solo `d
 | Análisis de precios | Dispersión por barrio, tipo de inmueble, área, estrato, rentabilidad bruta y barrios donde favorece comprar o arrendar |
 | Oferta y rotación | Anuncios activos por zona y tipo, distribución por precio y alcobas, y anuncios nuevos y retirados por semana |
 | Cuota y perfil | Cuota de inventario de cada inmobiliaria (total y por zona), concentración HHI, perfil de tipo, operación y estrato, y calidad de los datos |
+| Oportunidades y nichos | Barrios con poca cobertura, estratos sin anuncios, anuncios bajo o sobre el mercado de su barrio y precio y rentabilidad por barrio |
 | Inmobiliarias | Cobertura, concentración por comuna, precio relativo a su barrio, estratos y reconocimiento |
 | Propiedades compartidas | Parejas por confianza y grupos anónimos con el precio de cada inmobiliaria |
 | Evolución | Precios por semana y rotación de inventario |

@@ -250,6 +250,8 @@ TABLAS_AGREGADAS: Final = (
     "perfil_inmobiliaria",
     "calidad_inmobiliaria",
     "compartidas_inmobiliaria",
+    "desvio_precio",
+    "cobertura_estrato",
     "cobertura_inmobiliaria",
     "cobertura_comuna",
     "economia_inmobiliaria",

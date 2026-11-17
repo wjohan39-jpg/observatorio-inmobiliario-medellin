@@ -78,6 +78,7 @@ def test_inmobiliarias_con_reputacion_falsa(monkeypatch: pytest.MonkeyPatch) -> 
 
 PAGINAS_2 = [
     "pages/7_Análisis_de_precios.py",
+    "pages/8_Oferta_y_rotación.py",
     "pages/4_Propiedades_compartidas.py",
     "pages/5_Evolución.py",
     "pages/6_Metodología.py",
@@ -98,6 +99,26 @@ def test_precios_cambia_operacion_y_lectura() -> None:
     assert not app.exception
     tabla = app.dataframe[-1].value
     assert set(tabla["Lectura"]) == {"Favorece comprar"}
+
+
+def test_oferta_cambia_selectores() -> None:
+    app = _correr("pages/8_Oferta_y_rotación.py")
+    app.radio(key="operacion_oferta").set_value("arriendo").run()
+    assert not app.exception
+    app.selectbox(key="tipo_oferta").set_value("apartamento").run()
+    assert not app.exception
+    app.radio(key="nivel_oferta").set_value("comuna").run()
+    assert not app.exception
+    app.selectbox(key="tipo_distribucion").set_value("casa").run()
+    assert not app.exception
+
+
+def test_oferta_sin_columnas_privadas() -> None:
+    app = _correr("pages/8_Oferta_y_rotación.py")
+    assert app.dataframe
+    for tabla in app.dataframe:
+        columnas = {str(c).lower() for c in tabla.value.columns}
+        assert not columnas & {"id_fuente", "url", "latitud", "longitud"}
 
 
 def test_precios_sin_columnas_privadas() -> None:
@@ -122,9 +143,13 @@ def test_compartidos_cambia_nivel() -> None:
     assert not app.exception
 
 
-def test_evolucion_una_semana_muestra_aviso() -> None:
+def test_evolucion_avisa_solo_si_hay_una_semana() -> None:
+    from observatorio_inmobiliario.tablero import datos, graficas
+
+    semanas = graficas.semanas(datos.cargar_agregados()["evolucion_precios"])
     app = _correr("pages/5_Evolución.py")
-    assert any("una sola semana" in i.value for i in app.info)
+    hay_aviso = any("una sola semana" in i.value for i in app.info)
+    assert hay_aviso == (len(semanas) < 2)
 
 
 def test_metodologia_tiene_aviso_legal() -> None:

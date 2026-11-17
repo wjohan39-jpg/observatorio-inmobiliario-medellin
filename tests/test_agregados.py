@@ -12,12 +12,14 @@ from observatorio_inmobiliario.agregados import (
     cobertura_inmobiliaria,
     compartidos_fuentes,
     con_vivienda,
+    distribucion_oferta,
     economia_inmobiliaria,
     estrato_inferido,
     estratos_inmobiliaria,
     grupos_compartidos,
     indice_relativo,
     mercado_precios,
+    oferta_zona,
     precios_zona,
 )
 from observatorio_inmobiliario.emparejamiento import Confianza, agrupar, emparejar
@@ -716,3 +718,134 @@ def test_mercado_tipos_con_datos(limpio: Any) -> None:
     assert list(tabla.columns) == COLUMNAS_MERCADO
     assert str(tabla["precio_m2_media"].dtype) == "Int64"
     assert str(tabla["codigo"].dtype) == "string"
+
+
+# ----------------------------------------------------------------------- Oferta
+
+
+def _anuncios(n: int, prefijo: str, **cambios: Any) -> list[dict[str, Any]]:
+    return [fila(id_fuente=f"{prefijo}-{i}", **cambios) for i in range(n)]
+
+
+def _oferta_de(tabla: pd.DataFrame, nivel: str, codigo: str, tipo: str, operacion: str) -> int:
+    filas = tabla[
+        (tabla["nivel"] == nivel)
+        & (tabla["codigo"] == codigo)
+        & (tabla["tipo"] == tipo)
+        & (tabla["operacion"] == operacion)
+    ]
+    assert len(filas) == 1, (nivel, codigo, tipo, operacion, len(filas))
+    return int(filas["anuncios"].iloc[0])
+
+
+def test_oferta_zona_cuenta_por_nivel_y_tipo(limpio: Any) -> None:
+    filas = [
+        *_anuncios(3, "apto"),
+        *_anuncios(2, "local", tipo_normalizado="local"),
+        *_anuncios(1, "sin-barrio", codigo_barrio=None, barrio_normalizado=None),
+        *_anuncios(1, "sin-comuna", codigo_barrio=None, comuna=None, nombre_comuna=None),
+    ]
+    tabla = oferta_zona(base_analisis(limpio(*filas)), SEMANA)
+
+    assert _oferta_de(tabla, "ciudad", "ciudad", "todos", "arriendo") == 7
+    assert _oferta_de(tabla, "ciudad", "ciudad", "vivienda", "arriendo") == 5
+    assert _oferta_de(tabla, "comuna", "11", "todos", "arriendo") == 6  # sin el anuncio sin comuna
+    assert (
+        _oferta_de(tabla, "barrio", "1101", "todos", "arriendo") == 5
+    )  # sin el anuncio sin barrio
+    assert _oferta_de(tabla, "barrio", "1101", "apartamento", "arriendo") == 3
+    assert _oferta_de(tabla, "barrio", "1101", "local", "arriendo") == 2
+    assert set(tabla["semana"]) == {SEMANA}
+
+
+def test_oferta_zona_publica_celdas_pequenas(limpio: Any) -> None:
+    tabla = oferta_zona(base_analisis(limpio(*_anuncios(1, "solo"))), SEMANA)
+    assert _oferta_de(tabla, "barrio", "1101", "apartamento", "arriendo") == 1
+
+
+def test_oferta_zona_venta_y_arriendo_separados(limpio: Any) -> None:
+    filas = [*_anuncios(2, "a"), *_anuncios(3, "v", operacion="venta")]
+    tabla = oferta_zona(base_analisis(limpio(*filas)), SEMANA)
+    assert _oferta_de(tabla, "ciudad", "ciudad", "todos", "arriendo") == 2
+    assert _oferta_de(tabla, "ciudad", "ciudad", "todos", "venta") == 3
+
+
+def test_oferta_zona_sin_atipicos_ni_otras_ciudades(limpio: Any) -> None:
+    filas = [
+        *_anuncios(2, "ok"),
+        *_anuncios(1, "atipico", es_atipico=True),
+        *_anuncios(1, "afuera", es_medellin=False),
+    ]
+    tabla = oferta_zona(base_analisis(limpio(*filas)), SEMANA)
+    assert _oferta_de(tabla, "ciudad", "ciudad", "todos", "arriendo") == 2
+
+
+def test_oferta_zona_vacia(limpio: Any) -> None:
+    tabla = oferta_zona(base_analisis(limpio()), SEMANA)
+    assert tabla.empty
+    assert list(tabla.columns) == [
+        "semana",
+        "nivel",
+        "codigo",
+        "nombre",
+        "comuna",
+        "operacion",
+        "tipo",
+        "anuncios",
+    ]
+    assert str(tabla["anuncios"].dtype) == "Int64"
+
+
+def _cuenta(tabla: pd.DataFrame, **filtro: Any) -> int:
+    filas = tabla
+    for columna, valor in filtro.items():
+        filas = filas[filas[columna] == valor]
+    return int(filas["anuncios"].sum())
+
+
+def test_distribucion_por_precio_y_alcobas(limpio: Any) -> None:
+    filas = [
+        fila(id_fuente="a", precio=900_000, habitaciones=1),
+        fila(id_fuente="b", precio=1_000_000, habitaciones=2),  # el límite va al rango de arriba
+        fila(id_fuente="c", precio=9_000_000, habitaciones=7),
+        fila(id_fuente="d", precio=2_500_000, habitaciones=None),
+        fila(id_fuente="e", precio=2_500_000, habitaciones=0),
+        fila(id_fuente="v", precio=450_000_000, habitaciones=3, operacion="venta"),
+    ]
+    tabla = distribucion_oferta(base_analisis(limpio(*filas)), SEMANA)
+
+    arriendo = tabla[(tabla["operacion"] == "arriendo") & (tabla["tipo"] == "vivienda")]
+    assert _cuenta(arriendo, rango_precio="Menos de $1 M") == 1
+    assert _cuenta(arriendo, rango_precio="$1 a 2 M") == 1
+    assert _cuenta(arriendo, rango_precio="$2 a 3 M") == 2
+    assert _cuenta(arriendo, rango_precio="Más de $8 M") == 1
+    assert _cuenta(arriendo, alcobas="5 o más") == 1
+    assert _cuenta(arriendo, alcobas="Sin dato") == 1  # un nulo no es «5 o más»
+    assert _cuenta(arriendo, alcobas="0") == 1
+    assert arriendo["anuncios"].sum() == 5
+    assert _cuenta(tabla, operacion="venta", tipo="vivienda", rango_precio="$400 a 600 M") == 1
+    assert _cuenta(tabla, operacion="venta", tipo="vivienda", alcobas="3") == 1
+
+
+def test_distribucion_solo_vivienda_con_precio(limpio: Any) -> None:
+    filas = [
+        fila(id_fuente="a", precio=2_000_000),
+        fila(id_fuente="b", precio=None),
+        fila(id_fuente="c", precio=2_000_000, tipo_normalizado="local"),
+    ]
+    tabla = distribucion_oferta(base_analisis(limpio(*filas)), SEMANA)
+    assert set(tabla["tipo"]) == {"apartamento", "vivienda"}
+    assert _cuenta(tabla, tipo="vivienda") == 1
+
+
+def test_distribucion_vacia(limpio: Any) -> None:
+    tabla = distribucion_oferta(base_analisis(limpio()), SEMANA)
+    assert tabla.empty
+    assert list(tabla.columns) == [
+        "semana",
+        "operacion",
+        "tipo",
+        "rango_precio",
+        "alcobas",
+        "anuncios",
+    ]

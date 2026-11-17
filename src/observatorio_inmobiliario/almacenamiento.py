@@ -244,6 +244,8 @@ def leer_compartidos(
 TABLAS_AGREGADAS: Final = (
     "precios_zona",
     "mercado_precios",
+    "oferta_zona",
+    "distribucion_oferta",
     "cobertura_inmobiliaria",
     "cobertura_comuna",
     "economia_inmobiliaria",

@@ -631,3 +631,153 @@ def mercado_precios(base: pd.DataFrame, semana: str) -> pd.DataFrame:
     tabla = tabla.astype({c: "string" for c in _TEXTO_MERCADO})
     orden = tabla.sort_values(["analisis", "codigo", "operacion", "categoria"], kind="stable")
     return orden[COLUMNAS_MERCADO].reset_index(drop=True)
+
+
+# ----------------------------------------------------------------------- Oferta
+
+TODOS_LOS_TIPOS: Final = "todos"
+"""Valor de ``tipo`` que reúne todos los tipos de inmueble en :func:`oferta_zona`."""
+NIVEL_CIUDAD: Final = "ciudad"
+
+COLUMNAS_OFERTA_ZONA: Final = [
+    "semana",
+    "nivel",
+    "codigo",
+    "nombre",
+    "comuna",
+    "operacion",
+    "tipo",
+    "anuncios",
+]
+_TEXTO_OFERTA_ZONA: Final = COLUMNAS_OFERTA_ZONA[:7]
+
+RANGOS_PRECIO: Final = {
+    "arriendo": (
+        ("Menos de $1 M", "$1 a 2 M", "$2 a 3 M", "$3 a 5 M", "$5 a 8 M", "Más de $8 M"),
+        [0, 1_000_000, 2_000_000, 3_000_000, 5_000_000, 8_000_000, float("inf")],
+    ),
+    "venta": (
+        (
+            "Menos de $200 M",
+            "$200 a 400 M",
+            "$400 a 600 M",
+            "$600 a 1.000 M",
+            "$1.000 a 2.000 M",
+            "Más de $2.000 M",
+        ),
+        [0, 200e6, 400e6, 600e6, 1_000e6, 2_000e6, float("inf")],
+    ),
+}
+"""Rangos de precio en pesos (``M`` = millones) y sus límites, por operación: el arriendo es
+mensual y la venta es el precio total, por eso no comparten rangos."""
+ALCOBAS: Final = ("0", "1", "2", "3", "4", "5 o más", "Sin dato")
+"""Etiquetas del número de alcobas, en orden."""
+
+COLUMNAS_DISTRIBUCION: Final = [
+    "semana",
+    "operacion",
+    "tipo",
+    "rango_precio",
+    "alcobas",
+    "anuncios",
+]
+_TEXTO_DISTRIBUCION: Final = COLUMNAS_DISTRIBUCION[:5]
+
+
+def _contar_zona(
+    datos: pd.DataFrame,
+    nivel: str,
+    codigo: pd.Series,
+    nombre: pd.Series,
+) -> pd.DataFrame:
+    """Anuncios de ``datos`` por zona, operación y tipo, con las columnas de la tabla."""
+    zonas = pd.DataFrame(
+        {
+            "codigo": codigo.astype("string"),
+            "nombre": nombre.astype("string"),
+            "comuna": datos["comuna"].astype("string"),
+            "operacion": datos["operacion"].astype("string"),
+            "tipo": datos["tipo"].astype("string"),
+        }
+    )
+    cuenta = zonas.groupby(list(zonas.columns), observed=True, dropna=False).size()
+    return cuenta.rename("anuncios").reset_index().assign(nivel=nivel)
+
+
+def oferta_zona(base: pd.DataFrame, semana: str) -> pd.DataFrame:
+    """Anuncios activos por zona, operación y tipo de inmueble (pregunta 1 de la oferta).
+
+    Cuenta los anuncios únicos de la semana en Medellín, sin los marcados como atípicos (cerca
+    del 1 %). Una fila por nivel (``"ciudad"``, ``"comuna"`` o ``"barrio"``), zona, operación y
+    tipo; ``tipo`` incluye cada tipo de inmueble, ``"vivienda"`` y ``"todos"``. Son conteos, no
+    estadísticas de precio, así que se publican también las celdas pequeñas. Un anuncio sin
+    barrio oficial cuenta en su comuna, y uno sin comuna solo en la ciudad.
+    """
+    por_tipo = base.assign(tipo=base["tipo_normalizado"].astype("string"))
+    es_vivienda = base["tipo_normalizado"].isin(TIPOS_VIVIENDA).fillna(False).astype(bool)
+    vivienda = base[es_vivienda].assign(tipo=VIVIENDA)
+    todos = base.assign(tipo=TODOS_LOS_TIPOS)
+    datos = pd.concat([por_tipo, vivienda, todos], ignore_index=True)
+    if datos.empty:
+        return _vacia(COLUMNAS_OFERTA_ZONA, _TEXTO_OFERTA_ZONA)
+
+    ciudad = pd.Series(NIVEL_CIUDAD, index=datos.index, dtype="string")
+    con_comuna = datos[datos["comuna"].notna()]
+    con_barrio = datos[datos["codigo_barrio"].notna()]
+    partes = [
+        _contar_zona(
+            datos.assign(comuna=ciudad.map(lambda _: pd.NA)), NIVEL_CIUDAD, ciudad, ciudad
+        ),
+        _contar_zona(con_comuna, "comuna", con_comuna["comuna"], con_comuna["nombre_comuna"]),
+        _contar_zona(
+            con_barrio, "barrio", con_barrio["codigo_barrio"], con_barrio["barrio_normalizado"]
+        ),
+    ]
+    tabla = pd.concat(partes, ignore_index=True).assign(semana=semana)
+    tabla = tabla.astype({c: "string" for c in _TEXTO_OFERTA_ZONA})
+    tabla["anuncios"] = tabla["anuncios"].astype("Int64")
+    orden = tabla.sort_values(["nivel", "codigo", "operacion", "tipo"], kind="stable")
+    return orden[COLUMNAS_OFERTA_ZONA].reset_index(drop=True)
+
+
+def _etiqueta_alcobas(habitaciones: pd.Series) -> pd.Series:
+    """``"0"`` a ``"4"``, ``"5 o más"`` o ``"Sin dato"``."""
+    valores = habitaciones.astype("Float64")
+    texto = valores.clip(upper=5).astype("Int64").astype("string")
+    # El nulo se resuelve antes: ``mask`` trata una condición nula como verdadera.
+    return texto.mask((valores >= 5).fillna(False).astype(bool), "5 o más").fillna("Sin dato")
+
+
+def distribucion_oferta(base: pd.DataFrame, semana: str) -> pd.DataFrame:
+    """Anuncios de vivienda por rango de precio y número de alcobas (pregunta 3 de la oferta).
+
+    Una fila por operación, tipo (``"apartamento"``, ``"apartaestudio"``, ``"casa"`` y
+    ``"vivienda"``), rango de precio (:data:`RANGOS_PRECIO`) y alcobas (:data:`ALCOBAS`). Con
+    ella se arma la distribución por precio, por alcobas o las dos a la vez. Son conteos de
+    toda la ciudad: no se publica el barrio, así que no hay celdas con pocos anuncios.
+    """
+    vivienda = con_vivienda(base)
+    vivienda = vivienda[vivienda["precio"].notna()]
+    partes = []
+    for operacion, (etiquetas, limites) in RANGOS_PRECIO.items():
+        filas = vivienda[vivienda["operacion"] == operacion]
+        rangos = pd.cut(
+            filas["precio"].astype("float64"), limites, labels=list(etiquetas), right=False
+        ).astype("string")
+        claves = pd.DataFrame(
+            {
+                "operacion": pd.Series(operacion, index=filas.index, dtype="string"),
+                "tipo": filas["tipo"].astype("string"),
+                "rango_precio": rangos,
+                "alcobas": _etiqueta_alcobas(filas["habitaciones"]),
+            }
+        )
+        cuenta = claves.groupby(list(claves.columns), observed=True).size()
+        partes.append(cuenta.rename("anuncios").reset_index())
+    tabla = pd.concat(partes, ignore_index=True) if partes else pd.DataFrame()
+    if tabla.empty:
+        return _vacia(COLUMNAS_DISTRIBUCION, _TEXTO_DISTRIBUCION)
+    tabla = tabla.assign(semana=semana).astype({c: "string" for c in _TEXTO_DISTRIBUCION})
+    tabla["anuncios"] = tabla["anuncios"].astype("Int64")
+    orden = tabla.sort_values(["operacion", "tipo", "rango_precio", "alcobas"], kind="stable")
+    return orden[COLUMNAS_DISTRIBUCION].reset_index(drop=True)

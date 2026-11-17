@@ -15,12 +15,16 @@ import plotly.express as px
 import plotly.graph_objects as go
 
 from observatorio_inmobiliario.agregados import (
+    ALCOBAS,
     ANALISIS_AREA,
     ANALISIS_DISPERSION,
     ANALISIS_ESTRATO,
     ANALISIS_TIPO,
+    NIVEL_CIUDAD,
     RANGOS_AREA,
+    RANGOS_PRECIO,
     TIPOS_COMPARADOS,
+    TODOS_LOS_TIPOS,
 )
 
 COLORES_FUENTE: Final = {
@@ -679,3 +683,244 @@ def tabla_rentabilidad(precios: pd.DataFrame) -> pd.DataFrame:
     tabla = tabla.reset_index(drop=True)[list(columnas)].rename(columns=columnas)
     tabla = tabla.astype({"Venta (m²)": "int64", "Arriendo (m²)": "int64"})
     return tabla.round({"Rentabilidad bruta (%)": 1, "Años de arriendo = compra": 1})
+
+
+# ------------------------------------------------------------ Oferta y rotación
+
+_TIPOS_PRIMERO: Final = (TODOS_LOS_TIPOS, VIVIENDA)
+
+
+def _oferta(oferta: pd.DataFrame, nivel: str, operacion: str, tipo: str) -> pd.DataFrame:
+    """Las filas de un nivel, operación y tipo, con ``anuncios`` como entero normal."""
+    filas = oferta[
+        (oferta["nivel"] == nivel) & (oferta["operacion"] == operacion) & (oferta["tipo"] == tipo)
+    ]
+    return filas.assign(anuncios=filas["anuncios"].astype("int64"))
+
+
+def tipos_oferta(oferta: pd.DataFrame) -> list[str]:
+    """Los tipos con anuncios: primero ``todos`` y ``vivienda``, luego los demás de la A a la Z."""
+    existentes = set(oferta["tipo"].dropna().astype(str))
+    primeros = [t for t in _TIPOS_PRIMERO if t in existentes]
+    return primeros + sorted(existentes - set(_TIPOS_PRIMERO))
+
+
+def ubicacion_de_la_oferta(oferta: pd.DataFrame, operacion: str, tipo: str) -> tuple[int, int, int]:
+    """``(total, con comuna, con barrio)``: cuántos anuncios se pudieron ubicar."""
+    total, comuna, barrio = (
+        int(_oferta(oferta, nivel, operacion, tipo)["anuncios"].sum())
+        for nivel in (NIVEL_CIUDAD, "comuna", "barrio")
+    )
+    return total, comuna, barrio
+
+
+def oferta_por_tipo(oferta: pd.DataFrame, operacion: str) -> go.Figure:
+    """Anuncios activos de toda la ciudad por tipo de inmueble."""
+    titulo = f"{operacion.title()}: anuncios activos por tipo de inmueble"
+    filas = oferta[
+        (oferta["nivel"] == NIVEL_CIUDAD)
+        & (oferta["operacion"] == operacion)
+        & ~oferta["tipo"].isin(_TIPOS_PRIMERO)
+    ]
+    if filas.empty:
+        return _sin_datos(titulo)
+    filas = filas.assign(anuncios=filas["anuncios"].astype("int64")).sort_values("anuncios")
+    figura = px.bar(
+        filas,
+        x="anuncios",
+        y="tipo",
+        orientation="h",
+        labels={"anuncios": "Anuncios activos", "tipo": "Tipo"},
+        template=_PLANTILLA,
+    )
+    figura.update_layout(title=titulo, height=max(300, 28 * len(filas)))
+    return figura
+
+
+def oferta_comunas(oferta: pd.DataFrame, operacion: str, tipo: str) -> go.Figure:
+    """Anuncios activos en cada comuna."""
+    titulo = f"{operacion.title()} ({tipo}): anuncios activos por comuna"
+    filas = _oferta(oferta, "comuna", operacion, tipo)
+    if filas.empty:
+        return _sin_datos(titulo)
+    filas = filas.assign(nombre=filas["nombre"].astype(str).str.title()).sort_values("anuncios")
+    figura = px.bar(
+        filas,
+        x="anuncios",
+        y="nombre",
+        orientation="h",
+        labels={"anuncios": "Anuncios activos", "nombre": "Comuna"},
+        template=_PLANTILLA,
+    )
+    figura.update_layout(title=titulo, height=max(400, 24 * len(filas)))
+    return figura
+
+
+def oferta_barrios(oferta: pd.DataFrame, operacion: str, tipo: str, cuantos: int = 20) -> go.Figure:
+    """Los ``cuantos`` barrios con más anuncios activos."""
+    titulo = f"{operacion.title()} ({tipo}): los {cuantos} barrios con más anuncios"
+    filas = _oferta(oferta, "barrio", operacion, tipo)
+    if filas.empty:
+        return _sin_datos(titulo)
+    filas = filas.sort_values("anuncios").tail(cuantos)
+    figura = px.bar(
+        filas,
+        x="anuncios",
+        y="nombre",
+        orientation="h",
+        labels={"anuncios": "Anuncios activos", "nombre": "Barrio"},
+        template=_PLANTILLA,
+    )
+    figura.update_layout(title=titulo, height=max(400, 24 * len(filas)))
+    return figura
+
+
+def tabla_oferta(oferta: pd.DataFrame, nivel: str, operacion: str, tipo: str) -> pd.DataFrame:
+    """Anuncios activos de cada zona, de la que más tiene a la que menos."""
+    filas = _oferta(oferta, nivel, operacion, tipo)
+    if filas.empty:
+        return pd.DataFrame()
+    tabla = filas.sort_values("anuncios", ascending=False)[["nombre", "comuna", "anuncios"]]
+    return tabla.rename(columns={"nombre": "Nombre", "comuna": "Comuna", "anuncios": "Anuncios"})
+
+
+def _distribucion(distribucion: pd.DataFrame, operacion: str, tipo: str) -> pd.DataFrame:
+    filas = distribucion[(distribucion["operacion"] == operacion) & (distribucion["tipo"] == tipo)]
+    return filas.assign(anuncios=filas["anuncios"].astype("int64"))
+
+
+def _barras_conteo(datos: pd.DataFrame, titulo: str, orden: list[str], etiqueta: str) -> go.Figure:
+    figura = px.bar(
+        datos,
+        x="categoria",
+        y="anuncios",
+        category_orders={"categoria": orden},
+        labels={"categoria": etiqueta, "anuncios": "Anuncios"},
+        template=_PLANTILLA,
+    )
+    figura.update_layout(title=titulo)
+    return figura
+
+
+def distribucion_precio(distribucion: pd.DataFrame, operacion: str, tipo: str) -> go.Figure:
+    """Cuántos anuncios hay en cada rango de precio."""
+    titulo = f"{operacion.title()} ({tipo}): anuncios por rango de precio"
+    filas = _distribucion(distribucion, operacion, tipo)
+    if filas.empty:
+        return _sin_datos(titulo)
+    datos = filas.groupby("rango_precio")["anuncios"].sum().rename_axis("categoria").reset_index()
+    etiqueta = "Precio" + (" mensual" if operacion == "arriendo" else " de venta")
+    return _barras_conteo(datos, titulo, list(RANGOS_PRECIO[operacion][0]), etiqueta)
+
+
+def distribucion_alcobas(distribucion: pd.DataFrame, operacion: str, tipo: str) -> go.Figure:
+    """Cuántos anuncios hay con cada número de alcobas."""
+    titulo = f"{operacion.title()} ({tipo}): anuncios por número de alcobas"
+    filas = _distribucion(distribucion, operacion, tipo)
+    if filas.empty:
+        return _sin_datos(titulo)
+    datos = filas.groupby("alcobas")["anuncios"].sum().rename_axis("categoria").reset_index()
+    return _barras_conteo(datos, titulo, list(ALCOBAS), "Alcobas")
+
+
+def precio_y_alcobas(distribucion: pd.DataFrame, operacion: str, tipo: str) -> go.Figure:
+    """Mapa de calor: anuncios por rango de precio (filas) y alcobas (columnas)."""
+    titulo = f"{operacion.title()} ({tipo}): precio y alcobas a la vez"
+    filas = _distribucion(distribucion, operacion, tipo)
+    if filas.empty:
+        return _sin_datos(titulo)
+    rangos = list(RANGOS_PRECIO[operacion][0])
+    tabla = (
+        filas.pivot_table(
+            index="rango_precio", columns="alcobas", values="anuncios", aggfunc="sum", fill_value=0
+        )
+        .reindex(index=rangos, columns=list(ALCOBAS), fill_value=0)
+        .astype("int64")
+    )
+    figura = px.imshow(
+        tabla,
+        text_auto=True,
+        aspect="auto",
+        color_continuous_scale="Blues",
+        labels={"x": "Alcobas", "y": "Precio", "color": "Anuncios"},
+    )
+    figura.update_layout(title=titulo, template=_PLANTILLA)
+    return figura
+
+
+def _rotacion_total(rotacion: pd.DataFrame) -> pd.DataFrame:
+    """Nuevos y retirados por semana y operación, sumando las inmobiliarias comparables.
+
+    Solo cuentan las semanas con una semana anterior con la que comparar (``nuevos`` no nulo).
+    La tasa de retiro es retirados sobre los anuncios que había la semana anterior.
+    """
+    columnas = ["semana", "operacion", "inmobiliarias", "anuncios", "nuevos", "retirados"]
+    filas = rotacion[rotacion["operacion"].isin(["venta", "arriendo"]) & rotacion["nuevos"].notna()]
+    if filas.empty:
+        return pd.DataFrame(columns=[*columnas, "tasa_retiro_pct"])
+    grupos = filas.assign(
+        anuncios=filas["anuncios"].astype("int64"),
+        nuevos=filas["nuevos"].astype("int64"),
+        retirados=filas["retirados"].astype("int64"),
+    ).groupby(["semana", "operacion"])
+    tabla = pd.DataFrame(
+        {
+            "inmobiliarias": grupos.size(),
+            "anuncios": grupos["anuncios"].sum(),
+            "nuevos": grupos["nuevos"].sum(),
+            "retirados": grupos["retirados"].sum(),
+        }
+    ).reset_index()
+    anteriores = tabla["anuncios"] - tabla["nuevos"] + tabla["retirados"]
+    tabla["tasa_retiro_pct"] = (tabla["retirados"] / anteriores * 100).round(1)
+    return tabla.astype({"semana": "string", "operacion": "string"})
+
+
+def nuevos_y_retirados(rotacion: pd.DataFrame) -> go.Figure:
+    """Anuncios nuevos y retirados por semana, venta y arriendo por separado."""
+    titulo = "Anuncios nuevos y retirados por semana"
+    tabla = _rotacion_total(rotacion)
+    if tabla.empty:
+        return _sin_datos(titulo)
+    largo = (
+        tabla[["semana", "operacion", "nuevos", "retirados"]]
+        .melt(
+            id_vars=["semana", "operacion"],
+            value_vars=["nuevos", "retirados"],
+            var_name="movimiento",
+            value_name="anuncios",
+        )
+        .assign(movimiento=lambda d: d["movimiento"].str.title())
+    )
+    figura = px.bar(
+        largo,
+        x="semana",
+        y="anuncios",
+        color="movimiento",
+        barmode="group",
+        facet_col="operacion",
+        color_discrete_map={"Nuevos": "#2ca02c", "Retirados": "#d62728"},
+        labels={"anuncios": "Anuncios", "semana": "Semana", "movimiento": ""},
+        template=_PLANTILLA,
+    )
+    figura.update_layout(title=titulo)
+    figura.for_each_annotation(lambda a: a.update(text=a.text.split("=")[-1].title()))
+    return figura
+
+
+def tabla_rotacion_semana(rotacion: pd.DataFrame) -> pd.DataFrame:
+    """La rotación sumada de todas las inmobiliarias comparables, semana a semana."""
+    tabla = _rotacion_total(rotacion)
+    if tabla.empty:
+        return pd.DataFrame()
+    return tabla.sort_values(["semana", "operacion"]).rename(
+        columns={
+            "semana": "Semana",
+            "operacion": "Operación",
+            "inmobiliarias": "Inmobiliarias comparadas",
+            "anuncios": "Anuncios",
+            "nuevos": "Nuevos",
+            "retirados": "Retirados",
+            "tasa_retiro_pct": "Tasa de retiro (%)",
+        }
+    )

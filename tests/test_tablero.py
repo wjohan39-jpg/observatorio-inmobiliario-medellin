@@ -118,6 +118,13 @@ def _llamadas(tablas: dict[str, pd.DataFrame]) -> list[go.Figure]:
         graficas.rangos_area(tablas["mercado_precios"], "arriendo"),
         graficas.precio_comunas(tablas["precios_zona"], "venta"),
         graficas.rentabilidad_barrios(tablas["precios_zona"]),
+        graficas.oferta_por_tipo(tablas["oferta_zona"], "venta"),
+        graficas.oferta_comunas(tablas["oferta_zona"], "arriendo", "vivienda"),
+        graficas.oferta_barrios(tablas["oferta_zona"], "venta", "vivienda"),
+        graficas.distribucion_precio(tablas["distribucion_oferta"], "venta", "vivienda"),
+        graficas.distribucion_alcobas(tablas["distribucion_oferta"], "arriendo", "vivienda"),
+        graficas.precio_y_alcobas(tablas["distribucion_oferta"], "venta", "vivienda"),
+        graficas.nuevos_y_retirados(tablas["rotacion_inmobiliaria"]),
     ]
 
 
@@ -193,6 +200,83 @@ def test_rentabilidad_solo_barrios_con_venta_y_arriendo(
 
 def test_rentabilidad_vacia(vacias: dict[str, pd.DataFrame]) -> None:
     assert graficas.tabla_rentabilidad(vacias["precios_zona"]).empty
+
+
+def test_graficas_de_oferta_tienen_datos(reales: dict[str, pd.DataFrame]) -> None:
+    oferta, distribucion = reales["oferta_zona"], reales["distribucion_oferta"]
+    for operacion in ("venta", "arriendo"):
+        for figura in (
+            graficas.oferta_por_tipo(oferta, operacion),
+            graficas.oferta_comunas(oferta, operacion, "vivienda"),
+            graficas.oferta_barrios(oferta, operacion, "vivienda"),
+            graficas.distribucion_precio(distribucion, operacion, "vivienda"),
+            graficas.distribucion_alcobas(distribucion, operacion, "vivienda"),
+            graficas.precio_y_alcobas(distribucion, operacion, "vivienda"),
+        ):
+            assert figura.data, figura.layout.title.text
+
+
+def test_oferta_barrios_cuantos(reales: dict[str, pd.DataFrame]) -> None:
+    figura = graficas.oferta_barrios(reales["oferta_zona"], "arriendo", "vivienda", cuantos=10)
+    assert len(figura.data[0].y) == 10
+    assert list(figura.data[0].x) == sorted(figura.data[0].x)
+
+
+def test_tipos_oferta_empieza_por_todos(reales: dict[str, pd.DataFrame]) -> None:
+    tipos = graficas.tipos_oferta(reales["oferta_zona"])
+    assert tipos[:2] == ["todos", "vivienda"]
+    assert tipos[2:] == sorted(tipos[2:])
+
+
+def test_ubicacion_de_la_oferta(reales: dict[str, pd.DataFrame]) -> None:
+    total, con_comuna, con_barrio = graficas.ubicacion_de_la_oferta(
+        reales["oferta_zona"], "venta", "todos"
+    )
+    assert total >= con_comuna >= con_barrio > 0
+
+
+def test_tabla_oferta_ordenada(reales: dict[str, pd.DataFrame]) -> None:
+    tabla = graficas.tabla_oferta(reales["oferta_zona"], "barrio", "venta", "vivienda")
+    assert list(tabla.columns) == ["Nombre", "Comuna", "Anuncios"]
+    assert tabla["Anuncios"].is_monotonic_decreasing
+
+
+def test_oferta_vacia(vacias: dict[str, pd.DataFrame]) -> None:
+    assert graficas.tipos_oferta(vacias["oferta_zona"]) == []
+    assert graficas.ubicacion_de_la_oferta(vacias["oferta_zona"], "venta", "todos") == (0, 0, 0)
+    assert graficas.tabla_oferta(vacias["oferta_zona"], "barrio", "venta", "todos").empty
+
+
+def _rotacion() -> pd.DataFrame:
+    return pd.DataFrame(
+        {
+            "semana": ["2026-S46", "2026-S46", "2026-S47", "2026-S47", "2026-S47"],
+            "fuente": ["a", "b", "a", "b", "c"],
+            "operacion": ["arriendo"] * 5,
+            "anuncios": [100, 50, 110, 40, 10],
+            "nuevos": [None, None, 20, 5, None],
+            "retirados": [0, 0, 10, 15, 0],
+        }
+    ).astype({"nuevos": "Int64", "anuncios": "Int64", "retirados": "Int64"})
+
+
+def test_rotacion_semanal_suma_inmobiliarias_comparables() -> None:
+    tabla = graficas.tabla_rotacion_semana(_rotacion())
+    assert len(tabla) == 1  # la primera semana no tiene con qué comparar
+    fila = tabla.iloc[0]
+    assert fila["Semana"] == "2026-S47"
+    assert fila["Inmobiliarias comparadas"] == 2  # «c» no tiene semana anterior
+    assert fila["Nuevos"] == 25
+    assert fila["Retirados"] == 25
+    # había 150 - 25 + 25 = 150 anuncios la semana anterior
+    assert fila["Tasa de retiro (%)"] == pytest.approx(25 / 150 * 100, abs=0.1)
+
+
+def test_rotacion_sin_comparacion(vacias: dict[str, pd.DataFrame]) -> None:
+    primera = _rotacion().iloc[:2]
+    assert graficas.tabla_rotacion_semana(primera).empty
+    assert graficas.nuevos_y_retirados(primera).layout.title.text
+    assert graficas.tabla_rotacion_semana(vacias["rotacion_inmobiliaria"]).empty
 
 
 # ---------------------------------------------------------------- Formato

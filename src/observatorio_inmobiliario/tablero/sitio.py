@@ -71,7 +71,7 @@ def _seccion(id_: str, titulo: str, contenido: list[str]) -> str:
 
 
 def generar_sitio(tablas: dict[str, pd.DataFrame], geojson: dict[str, Any], salida: Path) -> Path:
-    """Escribe ``salida/index.html`` con las 7 secciones del dashboard y devuelve su ruta."""
+    """Escribe ``salida/index.html`` con las 8 secciones del dashboard y devuelve su ruta."""
     figura = _Graficas()
     cobertura = tablas["cobertura_inmobiliaria"]
     semana = str(cobertura["semana"].iloc[0]) if not cobertura.empty else "sin datos"
@@ -144,6 +144,45 @@ def generar_sitio(tablas: dict[str, pd.DataFrame], geojson: dict[str, Any], sali
             "baja, arrendar. Es una comparación entre barrios, no una recomendación: no "
             "incluye crédito, valorización ni costo de oportunidad.</p>",
             _tabla(graficas.tabla_rentabilidad(precios)),
+        ],
+    )
+    oferta, distribucion = tablas["oferta_zona"], tablas["distribucion_oferta"]
+    rotacion = tablas["rotacion_inmobiliaria"]
+    movimiento = _seccion(
+        "oferta",
+        "Oferta y rotación",
+        [
+            "<p>Anuncios de 9 inmobiliarias, no todo el mercado de Medellín. Un anuncio "
+            "<b>activo</b> es uno que apareció en el último scraping, sin los de precio "
+            "atípico (cerca del 1 %).</p>",
+            "<h3>Inmuebles activos por zona, tipo y operación</h3>",
+            figura(graficas.oferta_por_tipo(oferta, "venta")),
+            figura(graficas.oferta_por_tipo(oferta, "arriendo")),
+            figura(graficas.oferta_comunas(oferta, "venta", "vivienda")),
+            figura(graficas.oferta_comunas(oferta, "arriendo", "vivienda")),
+            figura(graficas.oferta_barrios(oferta, "venta", "vivienda")),
+            figura(graficas.oferta_barrios(oferta, "arriendo", "vivienda")),
+            "<p>Solo los anuncios con coordenadas válidas se pueden ubicar en un barrio: las "
+            "cifras por zona son un mínimo.</p>",
+            "<h4>Venta de vivienda por barrio</h4>",
+            _tabla(graficas.tabla_oferta(oferta, "barrio", "venta", "vivienda")),
+            "<h4>Arriendo de vivienda por barrio</h4>",
+            _tabla(graficas.tabla_oferta(oferta, "barrio", "arriendo", "vivienda")),
+            "<h3>Distribución por rango de precio y alcobas</h3>",
+            figura(graficas.distribucion_precio(distribucion, "venta", "vivienda")),
+            figura(graficas.distribucion_alcobas(distribucion, "venta", "vivienda")),
+            figura(graficas.precio_y_alcobas(distribucion, "venta", "vivienda")),
+            figura(graficas.distribucion_precio(distribucion, "arriendo", "vivienda")),
+            figura(graficas.distribucion_alcobas(distribucion, "arriendo", "vivienda")),
+            figura(graficas.precio_y_alcobas(distribucion, "arriendo", "vivienda")),
+            "<p>El arriendo es el canon mensual y la venta es el precio total (M = millones "
+            "de pesos). «Sin dato» son anuncios que no publican alcobas.</p>",
+            "<h3>Rotación: anuncios nuevos y retirados por semana</h3>",
+            figura(graficas.nuevos_y_retirados(rotacion)),
+            _tabla(graficas.tabla_rotacion_semana(rotacion)),
+            "<p>Cada inmobiliaria se compara con su propia semana anterior con datos. "
+            "<b>Retirado</b> significa que el anuncio ya no apareció en el scraping, no "
+            "necesariamente que se vendió o se arrendó.</p>",
         ],
     )
     indice = reconocimiento(cobertura, None)
@@ -228,11 +267,12 @@ Datos de la semana <b>{escape(semana)}</b>.</div>
 </header>
 <nav>
 <a href="#resumen">Resumen</a><a href="#barrios">Barrios</a><a href="#precios">Precios</a>
+<a href="#oferta">Oferta</a>
 <a href="#inmobiliarias">Inmobiliarias</a><a href="#compartidos">Compartidas</a>
 <a href="#evolucion">Evolución</a><a href="#metodologia">Metodología</a>
 </nav>
 <main>
-{resumen}{barrios}{analisis}{inmobiliarias}{compartidos}{evolucion}{metodologia}
+{resumen}{barrios}{analisis}{movimiento}{inmobiliarias}{compartidos}{evolucion}{metodologia}
 </main>
 <footer>Generado a partir de <code>data/agregados/</code> ·
 <a href="{REPOSITORIO}">Código en GitHub</a></footer>

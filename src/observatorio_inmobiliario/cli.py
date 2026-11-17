@@ -414,6 +414,8 @@ def _agregados(limpio: Path, compartidos: Path, salida: Path) -> int:
     tablas = {
         "precios_zona": agregados.precios_zona(base, semana),
         "mercado_precios": agregados.mercado_precios(base, semana),
+        "oferta_zona": agregados.oferta_zona(base, semana),
+        "distribucion_oferta": agregados.distribucion_oferta(base, semana),
         "cobertura_inmobiliaria": agregados.cobertura_inmobiliaria(base, semana),
         "cobertura_comuna": agregados.cobertura_comuna(base, semana),
         "economia_inmobiliaria": agregados.economia_inmobiliaria(base, semana),

@@ -153,6 +153,8 @@ Resume la última semana limpia y todo el histórico en `data/agregados/`. **Son
 |---|---|---|
 | `precios_zona` | 1. Precio por barrio | Mediana y cuartiles del precio y del precio por m², por barrio y comuna |
 | `mercado_precios` | Análisis de precios | Precio por m² (media, mediana, cuartiles y variación) por barrio, tipo de inmueble por comuna, rango de área y estrato |
+| `oferta_zona` | Oferta activa | Anuncios activos por barrio, comuna y ciudad, operación y tipo de inmueble (son conteos, se publican también las celdas pequeñas) |
+| `distribucion_oferta` | Oferta activa | Anuncios de vivienda por rango de precio y número de alcobas, para toda la ciudad |
 | `cobertura_inmobiliaria` | 2 y 6. Cobertura y reconocimiento | Anuncios, barrios y comunas de cada inmobiliaria, y su comuna principal |
 | `cobertura_comuna` | 2. Dónde se concentra | % de los anuncios de cada inmobiliaria en cada comuna |
 | `economia_inmobiliaria` | 3. Economía | Medianas de precio e índice de precio relativo a su barrio |
@@ -204,7 +206,7 @@ uv run --group analisis jupyter nbconvert --to notebook --execute --inplace note
 El dashboard tiene dos versiones con la misma información. Las dos leen solo `data/agregados/`, así que nunca muestran ids, enlaces ni coordenadas de anuncios.
 
 - **Sitio estático en GitHub Pages:** es el link de arriba. GitHub Actions (`.github/workflows/pages.yml`) lo genera con `observatorio sitio` y lo publica cada vez que cambian los datos agregados. Las gráficas son interactivas: zoom y detalle al pasar el mouse.
-- **App de Streamlit** (`app/`): 7 páginas con selectores. Se corre en local:
+- **App de Streamlit** (`app/`): 8 páginas con selectores. Se corre en local:
 
   ```bash
   uv run streamlit run app/Inicio.py
@@ -215,6 +217,7 @@ El dashboard tiene dos versiones con la misma información. Las dos leen solo `d
 | Inicio | Indicadores del mercado y mapa del precio por m² por barrio |
 | Barrios | Barrios más caros y más baratos, y venta vs. arriendo por comuna |
 | Análisis de precios | Dispersión por barrio, tipo de inmueble, área, estrato, rentabilidad bruta y barrios donde favorece comprar o arrendar |
+| Oferta y rotación | Anuncios activos por zona y tipo, distribución por precio y alcobas, y anuncios nuevos y retirados por semana |
 | Inmobiliarias | Cobertura, concentración por comuna, precio relativo a su barrio, estratos y reconocimiento |
 | Propiedades compartidas | Parejas por confianza y grupos anónimos con el precio de cada inmobiliaria |
 | Evolución | Precios por semana y rotación de inventario |

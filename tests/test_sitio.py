@@ -17,6 +17,7 @@ SECCIONES = [
     "resumen",
     "barrios",
     "precios",
+    "oferta",
     "inmobiliarias",
     "compartidos",
     "evolucion",
@@ -36,7 +37,7 @@ def test_generar_sitio_con_datos_reales(tmp_path: Path, reales: dict[str, pd.Dat
     html = ruta.read_text(encoding="utf-8")
     for seccion in SECCIONES:
         assert f'id="{seccion}"' in html, seccion
-    assert html.count("Plotly.newPlot") >= 25
+    assert html.count("Plotly.newPlot") >= 35
     assert html.count("cdn.plot.ly") == 1  # plotly.js se carga una sola vez
     # Los datos cambian cada semana: se comprueba contra lo que hay en data/agregados.
     assert str(reales["cobertura_inmobiliaria"]["semana"].max()) in html
@@ -72,7 +73,7 @@ def test_indicadores(reales: dict[str, pd.DataFrame]) -> None:
     esperados = int(cobertura.loc[cobertura["operacion"] == "todas", "anuncios"].sum())
     assert esperados > 0
     assert kpis["Anuncios analizados"] == entero(esperados)
-    assert kpis["Inmobiliarias"] == "9"
+    assert kpis["Inmobiliarias"] == str(cobertura["fuente"].nunique())
     assert kpis["m² de vivienda en venta"].endswith(" M")
 
 
